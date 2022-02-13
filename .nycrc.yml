@@ -1,0 +1,7 @@
+---
+reporter:
+- lcov
+- html
+- text-summary
+exclude:
+- test
