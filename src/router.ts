@@ -20,7 +20,7 @@ export interface MiddlewareFn {
 }
 
 interface ControllerMeta {
-  prefix: string
+  prefixs: string[]
   constructor: ControllerConstructor
   middlewares: Middleware[]
   befores: MiddlewareFn[]
@@ -35,14 +35,15 @@ interface Context extends KoaContext {
 }
 interface Middleware extends KoaMiddleware<DefaultState, Context> { }
 
-interface RouteMeta {
+interface RouteMetaRoute {
   verb: string
   path: string
-  params?: Record<string, string[]>
+}
+interface RouteMeta {
+  routes: RouteMetaRoute[]
   middlewares: Middleware[]
   befores: MiddlewareFn[]
   afters: MiddlewareFn[]
-  // validator: ValidateFunction<any>
   requestStream?: boolean
   responseStream?: boolean
   propertyName: string
@@ -57,7 +58,7 @@ export class KoaRouterManager {
       debug('@controller', prefix)
       if (!this.controllerMap.has(constructor)) {
         this.controllerMap.set(constructor, {
-            prefix,
+            prefixs: [],
             constructor,
             middlewares: [],
             befores: [],
@@ -66,7 +67,10 @@ export class KoaRouterManager {
         })
         return
       }
-      this.controllerMap.get(constructor).prefix = prefix
+      if (prefix) {
+        if (!this.controllerMap.get(constructor).prefixs.includes(prefix))
+        this.controllerMap.get(constructor).prefixs.push(prefix)
+       }
     }
   }
   
@@ -87,8 +91,6 @@ export class KoaRouterManager {
       }
     }
   }
-  
-  validator(jsonSchema: SchemaObject) { }
   
   before(beforeFunc: MiddlewareFn) {
     return (target: any, propertyName?: string, descriptor?: PropertyDescriptor) => {
@@ -134,9 +136,7 @@ export class KoaRouterManager {
       const methodMap = this.controllerMap.get(constructor).methodMap
       if (!methodMap[propertyName]) {
         methodMap[propertyName] = {
-          verb,
-          path,
-          params: {},
+          routes: [],
           middlewares: [],
           befores: [],
           afters: [],
@@ -144,10 +144,13 @@ export class KoaRouterManager {
           responseStream: false,
           propertyName,
         }
-        return
       }
-      methodMap[propertyName].verb = verb
-      methodMap[propertyName].path = path
+      if (verb && path) {
+        methodMap[propertyName].routes.push({
+          verb,
+          path,
+        })
+      }
     }
   }
   
@@ -163,9 +166,10 @@ export class KoaRouterManager {
     debug('getRouter')
     const router = new KoaRouter({ prefix })
     const controllers = Array.from(this.controllerMap.values())
+    debug('getRouter controller.length', controllers.length)
     controllers.forEach(controllerMeta => {
-      debug('getRouter controller prefix:', controllerMeta.prefix)
-      if (!controllerMeta.prefix) return
+      debug('getRouter controller prefix:', controllerMeta.prefixs)
+      if (!controllerMeta.prefixs?.length) return
       const controller = new controllerMeta.constructor()
       const controllerName = controllerMeta.constructor.name
       const controllerMiddlewares: Middleware[] = [...controllerMeta.middlewares]
@@ -198,35 +202,9 @@ export class KoaRouterManager {
       methods.forEach(methodMeta => {
         debug('getRouter method', methodMeta)
         const traceName = controllerName + '/' + methodMeta.propertyName
-        const routePath = (controllerMeta.prefix + methodMeta.path).replace(/\/+$/, '')
-        // debug('getRouter method verb:', methodMeta.verb, ' prefix:', controllerMeta.prefix, 'path:', methodMeta.path)
-        if (!methodMeta.path) return
+        // const routePath = (path.join(controllerMeta.prefix, methodMeta.path)).replace(/\/+$/, '') || '/'
+        if (!methodMeta.routes?.length) return
         const middlewares: Middleware[] = []
-  
-        // // define data middleware
-        // middlewares.push(async (ctx, next) => {
-        //   debug('running define state data')
-        //   ctx.routePath = routePath
-        //   ctx.state = Object.assign({}, ctx.query, ctx.params, ctx.request.body)
-        //   if (methodMeta.params) {
-        //     const all = {
-        //       params: ctx.params,
-        //       query: ctx.query,
-        //       body: ctx.request.body,
-        //       header: ctx.headers
-        //     }
-        //     ctx.state = Object.keys(methodMeta.params).reduce((result, key) => {
-        //       let value: any = undefined
-        //       methodMeta.params[key].some(fromPath => {
-        //         const fromKey = fromPath.split('.')[1] || key
-        //         value = all[fromPath] && all[fromPath][fromKey] || undefined
-        //         return value !== undefined
-        //       })
-        //       return Object.assign(result, {[key]: value})
-        //     }, {})
-        //   }
-        //   return next()
-        // })
   
         // middleware
         middlewares.push(...methodMeta.middlewares)
@@ -267,7 +245,12 @@ export class KoaRouterManager {
           })
         })
   
-        router.register(routePath, [methodMeta.verb], [...controllerMiddlewares, ...middlewares])
+        for (const controllerPrefix of controllerMeta.prefixs) {
+          for (const { verb, path: pathname } of methodMeta.routes) {
+            const routePath = (path.join(controllerPrefix, pathname)).replace(/\/+$/, '') || '/'
+            router.register(routePath, [verb], [...controllerMiddlewares, ...middlewares])
+          }
+        }
       })
     })
     return router
@@ -289,9 +272,7 @@ export class KoaRouterManager {
     logger?: any
   } = {}) {
     glob.sync(files, { cwd }).forEach(file => {
-      if (logger) {
-        logger.debug(`load api file ${file} ...`)
-      }
+      if (logger) logger.debug(`load api file ${file} ...`)
       require(path.resolve(cwd, file))
     })
     return this.getRouter(prefix)
@@ -322,10 +303,6 @@ export function get(path?: string) {
 
 export function post(path?: string) {
   return defaultManager.post(path)
-}
-
-export function validator(jsonSchema: SchemaObject) {
-  return defaultManager.validator(jsonSchema)
 }
 
 export function middleware(middleware: Middleware) {
