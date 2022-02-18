@@ -6,18 +6,11 @@
   "compilerOptions": {
     "target": "ESNext",
     "lib": ["es7"],
-    "rootDir": "src",
-    "outDir": "lib",
     "module": "commonjs",
     "moduleResolution": "node",
-    "declaration": true,
     "sourceMap": true,
     "inlineSources": true,
     "experimentalDecorators": true,
     "skipLibCheck": true,
   },
-  "include": [
-    "src/**/*",
-    "@types/**/*",
-  ],
 }

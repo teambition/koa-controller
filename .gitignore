@@ -1,8 +1,5 @@
-/node_modules
+node_modules
 .git-credentials
 /coverage
 /.nyc_output
-/config/local*
-/config/dev*
-/debug
 /lib
