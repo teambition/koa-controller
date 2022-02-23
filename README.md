@@ -90,7 +90,7 @@ Run `require` to require files and return koa router instance.
   - prefix: `<String>` Koa Router contructor's parameter to generate Koa Router.
   - logger: `<Logger>` Logger has `debug` or `info` method to debug file or functions.
 
-## Logger (WIP)
+## Logger (TODO)
 
 ## Tracer
 Use `opentracing` implemented tracer instance to cross-platform tracing.
@@ -154,6 +154,6 @@ class UserController {
 }
 ```
 
-## Error Handler (WIP)
+## Error Handler (TODO)
 
 ## Contribution (WIP)

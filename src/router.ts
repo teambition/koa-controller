@@ -201,8 +201,7 @@ export class KoaRouterManager {
       const methods = Object.values(controllerMeta.methodMap)
       methods.forEach(methodMeta => {
         debug('getRouter method', methodMeta)
-        const traceName = controllerName + '/' + methodMeta.propertyName
-        // const routePath = (path.join(controllerMeta.prefix, methodMeta.path)).replace(/\/+$/, '') || '/'
+        const routerName = controllerName + '/' + methodMeta.propertyName
         if (!methodMeta.routes?.length) return
         const middlewares: Middleware[] = []
   
@@ -214,7 +213,7 @@ export class KoaRouterManager {
         middlewares.push(async (ctx, next) => {
           for (const before of methodMeta.befores) {
             debug('running method before')
-            const span = ctx.span?.tracer().startSpan(traceName + '/' + (before.name || 'before'), { childOf: ctx.span })
+            const span = ctx.span?.tracer().startSpan(routerName + '/' + (before.name || 'before'), { childOf: ctx.span })
             span?.setTag('Method', methodMeta.propertyName)
             span?.setTag('Middeware', 'before')
             await before(ctx).finally(() => {
@@ -225,7 +224,7 @@ export class KoaRouterManager {
           await next()
           for (const after of methodMeta.afters) {
             debug('running method after')
-            const span = ctx.span?.tracer().startSpan(traceName + '/' + (after.name || 'after'), { childOf: ctx.span })
+            const span = ctx.span?.tracer().startSpan(routerName + '/' + (after.name || 'after'), { childOf: ctx.span })
             span?.setTag('Controller', controllerName)
             span?.setTag('Method', methodMeta.propertyName)
             span?.setTag('Middeware', 'after')
@@ -237,7 +236,7 @@ export class KoaRouterManager {
   
         // run process
         middlewares.push(async (ctx) => {
-          const span = ctx.span?.tracer().startSpan(traceName, { childOf: ctx.span })
+          const span = ctx.span?.tracer().startSpan(routerName, { childOf: ctx.span })
           span?.setTag('Controller', controllerName)
           span?.setTag('Method', methodMeta.propertyName)
           ctx.body = await controller[methodMeta.propertyName](ctx.state, ctx).finally(() => {
@@ -248,7 +247,7 @@ export class KoaRouterManager {
         for (const controllerPrefix of controllerMeta.prefixs) {
           for (const { verb, path: pathname } of methodMeta.routes) {
             const routePath = (path.join(controllerPrefix, pathname)).replace(/\/+$/, '') || '/'
-            router.register(routePath, [verb], [...controllerMiddlewares, ...middlewares])
+            router.register(routePath, [verb], [...controllerMiddlewares, ...middlewares], { name: routerName })
           }
         }
       })

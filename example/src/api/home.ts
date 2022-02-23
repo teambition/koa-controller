@@ -27,4 +27,9 @@ export class HomeController {
   async getById(state) {
     return state
   }
+
+  @get('/error')
+  async errored() {
+    throw new Error('boom')
+  }
 }
