@@ -1,6 +1,6 @@
 {
   "name": "@tng/koa-controller",
-  "version": "0.1.0",
+  "version": "0.1.0-prerelease",
   "description": "Write koa http server with koa-controller by decorator feature in typescript.",
   "main": "lib/index.js",
   "scripts": {
@@ -20,18 +20,23 @@
   "devDependencies": {
     "@types/debug": "^4.1.7",
     "@types/glob": "^7.2.0",
+    "@types/http-errors": "^1.8.2",
     "@types/koa": "^2.13.4",
     "@types/koa-bodyparser": "^4.3.5",
     "@types/koa-router": "^7.4.4",
+    "@types/lodash": "^4.14.178",
     "@types/mocha": "^9.1.0",
     "@types/node": "^17.0.17",
+    "koa": "^2.13.4",
+    "koa-bodyparser": "^4.3.0",
     "mocha": "^9.2.0",
+    "nyc": "^15.1.0",
     "ts-node": "^10.5.0",
     "typescript": "^4.5.5"
   },
   "author": {
     "name": "Orange Mi",
-    "email": "orangemiwj@gamil.com"
+    "email": "orangemiwj@gmail.com"
   },
   "repository": {
     "type": "git",
@@ -39,7 +44,7 @@
   },
   "homepage": "https://github.com/teambition/koa-controller#readme",
   "bugs": {
-    "url" : "https://github.com/teambition/koa-controller/issues"
+    "url": "https://github.com/teambition/koa-controller/issues"
   },
   "license": "MIT"
 }

@@ -1,0 +1,20 @@
+{
+  "name": "example",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon -w src -e js,ts --exec ts-node src/app.ts",
+    "start": "ts-node src/app.ts"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/jaeger-client": "^3.18.3",
+    "nodemon": "^2.0.15"
+  },
+  "dependencies": {
+    "jaeger-client": "^3.19.0",
+    "koa": "^2.13.4"
+  }
+}
