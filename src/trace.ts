@@ -25,6 +25,7 @@ export function traceMW(tracer: Tracer, { zipkinHeaderEnable, als }: { zipkinHea
 
     if (als && als.getStore()) {
       als.getStore().span = span
+      als.getStore().traceId = traceId
     } 
 
     return next().finally(() => {
