@@ -11,8 +11,16 @@ interface Context extends KoaContext {
 
 interface Middleware extends KoaMiddleware<DefaultState, Context> { }
 
-export function traceMW(tracer: Tracer, { zipkinHeaderEnable, als }: { zipkinHeaderEnable?: boolean, als?: AsyncLocalStorage<any> } = {}): Middleware {
+export function alsMW<T = any>(als: AsyncLocalStorage<T>): Middleware {
   return async (ctx, next) => {
+    return als.run({} as any, () => {
+      return next()
+    })
+  }
+}
+
+export function traceMW(tracer: Tracer, { zipkinHeaderEnable, als }: { zipkinHeaderEnable?: boolean, als?: AsyncLocalStorage<any> } = {}): Middleware {
+  return async function traceMW (ctx, next) {
     let parentSpanContext = tracer.extract(FORMAT_HTTP_HEADERS, ctx.headers)
     if (!parentSpanContext?.toTraceId() && zipkinHeaderEnable) {
       parentSpanContext = tracer.extract('ZIPKIN_HTTP_HEADERS', ctx.headers)
@@ -23,7 +31,7 @@ export function traceMW(tracer: Tracer, { zipkinHeaderEnable, als }: { zipkinHea
     })
     const traceId = ctx.traceId = span?.context().toTraceId() || randomUUID()
 
-    if (als && als.getStore()) {
+    if (als?.getStore()) {
       als.getStore().span = span
       als.getStore().traceId = traceId
     } 

@@ -5,29 +5,9 @@ import * as KoaRouter from 'koa-router'
 import type { Context as KoaContext, DefaultState, Middleware as KoaMiddleware } from 'koa'
 import type { Span } from 'opentracing'
 import type { SchemaObject } from 'ajv'
-
-const debug = Debug('koa:controller')
-
-interface Controller {
-}
-
-interface ControllerConstructor extends Function {
-  new (): Controller
-}
-
-export interface MiddlewareFn {
-  (ctx: Context): Promise<void>
-}
-
-interface ControllerMeta {
-  prefixs: string[]
-  constructor: ControllerConstructor
-  middlewares: Middleware[]
-  befores: MiddlewareFn[]
-  afters: MiddlewareFn[]
-  methodMap: Record<string, RouteMeta>
-}
-
+import type Ajv from 'ajv'
+import { Logger } from './logger'
+import { strict as assert } from'assert'
 
 interface Context extends KoaContext {
   span?: Span
@@ -35,289 +15,241 @@ interface Context extends KoaContext {
 }
 interface Middleware extends KoaMiddleware<DefaultState, Context> { }
 
-interface RouteMetaRoute {
+export interface MiddlewareFn {
+  (ctx: Context): Promise<void>
+}
+
+const debug = Debug('koa:controller')
+const controllerSymbol = Symbol('controller')
+
+interface Controller {
+}
+
+interface ControllerConstructor extends Function {
+  new (): Controller
+  [controllerSymbol]?: ControllerMeta
+}
+
+class ControllerMeta {
+  prefixs: string[] = []
+  middlewares: Middleware[] = []
+  methodMetaMap: Map<string, MethodMeta> = new Map()
+}
+
+class Route {
   verb: string
-  path: string
+  pathname: string
+  constructor({ verb, pathname }: { verb: string, pathname: string }) {
+    this.verb = verb
+    this.pathname = pathname
+  }
 }
-interface RouteMeta {
-  routes: RouteMetaRoute[]
-  middlewares: Middleware[]
-  befores: MiddlewareFn[]
-  afters: MiddlewareFn[]
-  requestStream?: boolean
-  responseStream?: boolean
-  propertyName: string
+class MethodMeta {
+  routes: Route[] = []
+  middlewares: Middleware[] = []
+  requestStream?: boolean = false
+  responseStream?: boolean = false
 }
 
-export class KoaRouterManager {
-  controllerMap = new Map<ControllerConstructor, ControllerMeta>()
-  logger: any
-  
-  controller(prefix = '/') {
-    return (constructor: ControllerConstructor) => {
-      debug('@controller', prefix)
-      if (!this.controllerMap.has(constructor)) {
-        this.controllerMap.set(constructor, {
-            prefixs: [],
-            constructor,
-            middlewares: [],
-            befores: [],
-            afters: [],
-            methodMap: {},
-        })
-        return
-      }
-      if (prefix) {
-        if (!this.controllerMap.get(constructor).prefixs.includes(prefix))
-        this.controllerMap.get(constructor).prefixs.push(prefix)
-       }
+export function controller(prefix = '/') {
+  assert.ok(prefix)
+  return (constructor: ControllerConstructor) => {
+    debug(`@controller ${constructor.name} prefix = ${prefix}`)
+    if (!Reflect.has(constructor, controllerSymbol)) {
+      Reflect.set(constructor, controllerSymbol, new ControllerMeta())
     }
-  }
-  
-  middleware(middleware: Middleware) {
-    return (target: any, propertyName?: string, descriptor?: PropertyDescriptor) => {
-      debug('@middleware')
-      if (typeof propertyName === 'undefined') {
-        // class Decorator
-        const constructor: ControllerConstructor = target
-        if (!this.controllerMap.has(constructor)) this.controller('')(constructor)
-        this.controllerMap.get(constructor).middlewares.unshift(middleware)
-      } else {
-        // method Decorator
-        const constructor: ControllerConstructor = target.constructor
-        if (!this.controllerMap.has(constructor)) this.controller('')(constructor)
-        if (!this.controllerMap.get(constructor).methodMap[propertyName]) this.request('', '')(target, propertyName, descriptor)
-        this.controllerMap.get(constructor).methodMap[propertyName].middlewares.unshift(middleware)
-      }
-    }
-  }
-  
-  before(beforeFunc: MiddlewareFn) {
-    return (target: any, propertyName?: string, descriptor?: PropertyDescriptor) => {
-      debug('@before')
-      if (typeof propertyName === 'undefined') {
-        // class Decorator
-        const constructor: ControllerConstructor = target
-        if (!this.controllerMap.has(constructor)) this.controller('')(constructor)
-        this.controllerMap.get(constructor).befores.unshift(beforeFunc)
-      } else {
-        // method Decorator
-        const constructor: ControllerConstructor = target.constructor
-        if (!this.controllerMap.has(constructor)) this.controller('')(constructor)
-        if (!this.controllerMap.get(constructor).methodMap[propertyName]) this.request('', '')(target, propertyName, descriptor)
-        this.controllerMap.get(constructor).methodMap[propertyName].befores.unshift(beforeFunc)
-      }
-    }
-  }
-  
-  after(afterFunc: MiddlewareFn) {
-    return (target: any, propertyName?: string, descriptor?: PropertyDescriptor) => {
-      debug('@after')
-      if (typeof propertyName === 'undefined') {
-        // class Decorator
-        const constructor: ControllerConstructor = target
-        if (!this.controllerMap.has(constructor)) this.controller('')(constructor)
-        this.controllerMap.get(constructor).afters.unshift(afterFunc)
-      } else {
-        // method Decorator
-        const constructor: ControllerConstructor = target.constructor
-        if (!this.controllerMap.has(constructor)) this.controller('')(constructor)
-        if (!this.controllerMap.get(constructor).methodMap[propertyName]) this.request('', '')(target, propertyName, descriptor)
-        this.controllerMap.get(constructor).methodMap[propertyName].afters.unshift(afterFunc)
-      }
-    }
-  }
-  
-  request(verb = 'get', path = '/') {
-    return (target: any, propertyName: string, descriptor: PropertyDescriptor) => {
-      const constructor = target.constructor
-      debug('@request', verb, path)
-      if (!this.controllerMap.has(constructor)) this.controller('')(constructor)
-      const methodMap = this.controllerMap.get(constructor).methodMap
-      if (!methodMap[propertyName]) {
-        methodMap[propertyName] = {
-          routes: [],
-          middlewares: [],
-          befores: [],
-          afters: [],
-          requestStream: false,
-          responseStream: false,
-          propertyName,
-        }
-      }
-      if (verb && path) {
-        methodMap[propertyName].routes.push({
-          verb,
-          path,
-        })
-      }
-    }
-  }
-  
-  get(path = '/') {
-    return this.request('get', path)
-  }
-  
-  post(path = '/') {
-    return this.request('post', path)
-  }
-  
-  getRouter(prefix = '') {
-    debug('getRouter')
-    const router = new KoaRouter({ prefix })
-    const controllers = Array.from(this.controllerMap.values())
-    debug('getRouter controller.length', controllers.length)
-    controllers.forEach(controllerMeta => {
-      debug('getRouter controller prefix:', controllerMeta.prefixs)
-      if (!controllerMeta.prefixs?.length) return
-      const controller = new controllerMeta.constructor()
-      const controllerName = controllerMeta.constructor.name
-      const controllerMiddlewares: Middleware[] = [...controllerMeta.middlewares]
 
-      // before after middlewares
-      controllerMiddlewares.push(async (ctx, next) => {
-        for (const before of controllerMeta.befores) {
-          debug('running controller before')
-          const span = ctx.span?.tracer().startSpan(controllerName + '/' + (before.name || 'before'), { childOf: ctx.span })
-          span?.setTag('Controller', controllerName)
-          span?.setTag('Middeware', 'before')
-          await before(ctx).finally(() => {
-            span?.finish()
-          })
-        }
-        debug('running controller')
-        await next()
-        for (const after of controllerMeta.afters) {
-          debug('running controller after')
-          const span = ctx.span?.tracer().startSpan(controllerName + '/' + (after.name || 'after'), { childOf: ctx.span })
-          span?.setTag('Controller', controllerName)
-          span?.setTag('Middeware', 'after')
-          await after(ctx).finally(() => {
-            span?.finish()
-          })
-        }
-      })
-  
-      const methods = Object.values(controllerMeta.methodMap)
-      methods.forEach(methodMeta => {
-        debug('getRouter method', methodMeta)
-        const routerName = controllerName + '/' + methodMeta.propertyName
-        if (!methodMeta.routes?.length) return
-        const middlewares: Middleware[] = []
-  
-        // middleware
-        middlewares.push(...methodMeta.middlewares)
-        debug('methodMeta.middlewares', methodMeta.middlewares.length)
-  
-        // before after middlewares
-        middlewares.push(async (ctx, next) => {
-          for (const before of methodMeta.befores) {
-            debug('running method before')
-            const span = ctx.span?.tracer().startSpan(routerName + '/' + (before.name || 'before'), { childOf: ctx.span })
-            span?.setTag('Method', methodMeta.propertyName)
-            span?.setTag('Middeware', 'before')
-            await before(ctx).finally(() => {
-              span?.finish()
-            })
-          }
-          debug('running method function')
-          await next()
-          for (const after of methodMeta.afters) {
-            debug('running method after')
-            const span = ctx.span?.tracer().startSpan(routerName + '/' + (after.name || 'after'), { childOf: ctx.span })
-            span?.setTag('Controller', controllerName)
-            span?.setTag('Method', methodMeta.propertyName)
-            span?.setTag('Middeware', 'after')
-            await after(ctx).finally(() => {
-              span?.finish()
-            })
-          }
+    if (!Reflect.get(constructor, controllerSymbol).prefixs.includes(prefix)) {
+      Reflect.get(constructor, controllerSymbol).prefixs.push(prefix)
+    }
+  }
+}
+
+export function middleware(middleware: Middleware, pushToBottom = false) {
+  const middlewareName = middleware.name || 'middleware'
+  return (target: any, propertyName?: string, descriptor?: PropertyDescriptor) => {
+    if (typeof propertyName === 'undefined') {
+      // class Decorator
+      const constructor: ControllerConstructor = target
+      const controllerName = constructor.name
+      debug(`@middleware for controller ${controllerName}`)
+
+      const mw: Middleware = async (ctx, next) => {
+        debug(`invoke controllerMiddleware ${controllerName}/${middlewareName}`)
+        const span = ctx.span?.tracer().startSpan(`${controllerName}/${middlewareName}`, { childOf: ctx.span })
+        span?.setTag('Controller', controllerName)
+        span?.setTag('Middeware', middlewareName)
+        return middleware(ctx, next).finally(() => {
+          span?.finish()
         })
-  
-        // run process
-        middlewares.push(async (ctx) => {
-          const span = ctx.span?.tracer().startSpan(routerName, { childOf: ctx.span })
-          span?.setTag('Controller', controllerName)
-          span?.setTag('Method', methodMeta.propertyName)
-          ctx.body = await controller[methodMeta.propertyName](ctx.state, ctx).finally(() => {
-            span?.finish()
-          })
+      }
+      Object.defineProperty(mw, 'name', { value: middlewareName })
+
+      if (!Reflect.has(constructor, controllerSymbol)) {
+        Reflect.set(constructor, controllerSymbol, new ControllerMeta())
+      }
+      if (pushToBottom) {
+        Reflect.get(constructor, controllerSymbol).middlewares.push(mw)
+      } else {
+        Reflect.get(constructor, controllerSymbol).middlewares.unshift(mw)
+      }
+    } else {
+      // method Decorator
+      const constructor: ControllerConstructor = target.constructor
+      const controllerName = constructor.name
+      debug(`@middleware for method ${controllerName}/${propertyName}`)
+
+      const mw: Middleware = async (ctx, next) => {
+        debug(`invoke methodMiddleware ${controllerName}/${propertyName}/${middlewareName}`)
+        const span = ctx.span?.tracer().startSpan(`${controllerName}/${propertyName}/${middlewareName}}`, { childOf: ctx.span })
+        span?.setTag('Controller', controllerName)
+        span?.setTag('Method', propertyName)
+        span?.setTag('Middeware', middlewareName)
+        return middleware(ctx, next).finally(() => {
+          span?.finish()
         })
+      }
+      Object.defineProperty(mw, 'name', { value: middlewareName })
+
+      const controllerConstructor: ControllerConstructor = target.constructor
+      if (!Reflect.has(controllerConstructor, controllerSymbol)) {
+        Reflect.set(controllerConstructor, controllerSymbol, new ControllerMeta())
+      }
+      const methodMetaMap = Reflect.get(controllerConstructor, controllerSymbol).methodMetaMap
+      if (!methodMetaMap.has(propertyName)) {
+        methodMetaMap.set(propertyName, new MethodMeta())
+      }
+
+      if (pushToBottom) {
+        methodMetaMap.get(propertyName).middlewares.push(mw)
+      } else {
+        methodMetaMap.get(propertyName).middlewares.unshift(mw)
+      }
+    }
+  }
+}
   
-        for (const controllerPrefix of controllerMeta.prefixs) {
-          for (const { verb, path: pathname } of methodMeta.routes) {
-            const routePath = (path.join(controllerPrefix, pathname)).replace(/\/+$/, '') || '/'
-            router.register(routePath, [verb], [...controllerMiddlewares, ...middlewares], { name: routerName })
-          }
+export function before(beforeFunc: MiddlewareFn) {
+  const beforeName = beforeFunc.name || 'before'
+  const mw: Middleware = async (ctx, next) => {
+    await beforeFunc(ctx)
+    return next()
+  }
+  Object.defineProperty(mw, 'name', { value: beforeName })
+  return middleware(mw)
+}
+  
+export function after(afterFunc: MiddlewareFn) {
+  const afterName = afterFunc.name || 'after'
+  const mw: Middleware = async (ctx, next) => {
+    await next()
+    await afterFunc(ctx)
+  }
+  Object.defineProperty(mw, 'name', { value: afterName })
+  return middleware(mw, true)
+}
+
+export function request(verb = 'get', pathname = '/') {
+  assert.ok(verb)
+  assert.ok(pathname)
+  return (target: any, propertyName: string, descriptor: PropertyDescriptor) => {
+    const controllerConstructor: ControllerConstructor = target.constructor
+    debug(`@request ${controllerConstructor.name}/${propertyName} ${verb} ${pathname}`)
+    if (!Reflect.has(controllerConstructor, controllerSymbol)) {
+      Reflect.set(controllerConstructor, controllerSymbol, new ControllerMeta())
+    }
+    const methodMetaMap = Reflect.get(controllerConstructor, controllerSymbol).methodMetaMap
+    if (!methodMetaMap.has(propertyName)) {
+      methodMetaMap.set(propertyName, new MethodMeta())
+    }
+
+    methodMetaMap.get(propertyName).routes.push(new Route({
+      verb,
+      pathname,
+    }))
+  }
+}
+
+export function get(path = '/') {
+  return request('get', path)
+}
+
+export function post(path = '/') {
+  return request('post', path)
+}
+
+export function getRouter({
+  prefix = '',
+  logger,
+  controllerConstructors,
+}: {
+  prefix?: string
+  logger?: Logger
+  controllerConstructors: ControllerConstructor[]
+}) {
+  debug(`getRouter controllers: ${controllerConstructors.length}`)
+  const router = new KoaRouter({ prefix })
+  controllerConstructors.forEach(controllerConstructor => {
+    if (typeof controllerConstructor !== 'function') return
+    const controllerMeta = Reflect.get(controllerConstructor, controllerSymbol)
+    if (!controllerMeta) return
+
+    const controller = new controllerConstructor()
+    const controllerName = controllerConstructor.name
+    const controllerMiddlewares = controllerMeta.middlewares || []
+
+    controllerMeta.methodMetaMap.forEach((methodMeta, propertyName) => {
+      debug('getRouter method', methodMeta)
+      if (typeof controller[propertyName] !== 'function') return
+      const routerName = controllerName + '/' + propertyName
+      const methodMiddlewares = methodMeta.middlewares || []
+
+      // run process
+      const mainMW: Middleware = async (ctx) => {
+        const span = ctx.span?.tracer().startSpan(routerName, { childOf: ctx.span })
+        span?.setTag('Controller', controllerName)
+        span?.setTag('Method', propertyName)
+        ctx.body = await controller[propertyName](ctx.state, ctx).finally(() => {
+          span?.finish()
+        })
+      }
+
+      for (const prefix of controllerMeta.prefixs) {
+        for (const { verb, pathname } of methodMeta.routes) {
+          const route = (path.join(prefix, pathname)).replace(/\/+$/, '') || '/'
+          debug(`register ${verb} ${route} ${routerName} (${controllerMiddlewares.length + methodMiddlewares.length} mw)`)
+          router.register(route, [verb], [...controllerMiddlewares, ...methodMiddlewares, mainMW], { name: routerName })
         }
-      })
+      }
     })
-    return router
-  }
-  
-  clearAll() {
-    this.controllerMap.clear()  
-  }
-  
-  getRouterSync({
-    cwd = process.cwd(),
-    files = 'api/**/*.[jt]s',
-    prefix = '',
-    logger
-  }: {
-    cwd?: string
-    files?: string
-    prefix?: string
-    logger?: any
-  } = {}) {
-    glob.sync(files, { cwd }).forEach(file => {
-      if (logger) logger.debug(`load api file ${file} ...`)
-      require(path.resolve(cwd, file))
-    })
-    return this.getRouter(prefix)
-  }
-}
-
-export const defaultManager = new KoaRouterManager()
-
-export function controller(path?: string) {
-  return defaultManager.controller(path)
-}
-
-export function request(verb = 'get', path = '/') {
-  return defaultManager.request(verb, path)
-}
-
-export function before(func: MiddlewareFn) {
-  return defaultManager.before(func)
-}
-
-export function after(func: MiddlewareFn) {
-  return defaultManager.after(func)
-}
-
-export function get(path?: string) {
-  return defaultManager.get(path)
-}
-
-export function post(path?: string) {
-  return defaultManager.post(path)
-}
-
-export function middleware(middleware: Middleware) {
-  return defaultManager.middleware(middleware)
+  })
+  return router
 }
 
 export function getRouterSync({
   cwd = process.cwd(),
   files = 'api/**/*.[jt]s',
   prefix = '',
-  logger,
+  logger
 }: {
   cwd?: string
   files?: string
   prefix?: string
   logger?: any
 } = {}) {
-  return defaultManager.getRouterSync({cwd, files, prefix, logger})
+  const controllerConstructors: ControllerConstructor[] = []
+  glob.sync(files, { cwd }).forEach(file => {
+    debug(`getRouterSync: load file ${file} ...`)
+    const exportObject = require(path.resolve(cwd, file))
+    if (typeof exportObject === 'function') { 
+      controllerConstructors.push(exportObject)
+    } else if (typeof exportObject === 'object') {
+      Object.values(exportObject)
+        .filter(exportMember => typeof exportMember === 'function')
+        .forEach((exportMember: ControllerConstructor) => {
+          controllerConstructors.push(exportMember)
+        })
+    }
+  })
+  return getRouter({ prefix, controllerConstructors, logger })
 }

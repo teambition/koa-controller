@@ -1,22 +1,17 @@
 import 'mocha'
 import { strict as assert } from 'assert'
-import { KoaRouterManager } from '../src/router'
+import * as router from '../src/router'
 import { Context } from 'koa'
 
 describe('http-server router test suite', () => {
-  let router: KoaRouterManager
-  beforeEach(() => {
-    router = new KoaRouterManager()
-  })
-
   it('router sequence', async () => {
     let sequence = 0
     @router.controller()
     @router.before(async (ctx) => {
-      assert.equal(sequence++, 2)
+      assert.equal(sequence++, 0)
     })
     @router.before(async (ctx) => {
-      assert.equal(sequence++, 3)
+      assert.equal(sequence++, 1)
     })
     @router.after(async (ctx) => {
       assert.equal(sequence++, 11)
@@ -25,20 +20,20 @@ describe('http-server router test suite', () => {
       assert.equal(sequence++, 12)
     })
     @router.middleware(async (ctx, next) => {
-      assert.equal(sequence++, 0)
+      assert.equal(sequence++, 2)
       return next()
     })
     @router.middleware(async (ctx, next) => {
-      assert.equal(sequence++, 1)
+      assert.equal(sequence++, 3)
       return next()
     })
     class FakeController {
       @router.get('getFunc')
       @router.before(async (ctx) => {
-        assert.equal(sequence++, 6)
+        assert.equal(sequence++, 4)
       })
       @router.before(async (ctx) => {
-        assert.equal(sequence++, 7)
+        assert.equal(sequence++, 5)
       })
       @router.after(async (ctx) => {
         assert.equal(sequence++, 9)
@@ -47,11 +42,11 @@ describe('http-server router test suite', () => {
         assert.equal(sequence++, 10)
       })
       @router.middleware(async (ctx, next) => {
-        assert.equal(sequence++, 4)
+        assert.equal(sequence++, 6)
         return next()
       })
       @router.middleware(async (ctx, next) => {
-        assert.equal(sequence++, 5)
+        assert.equal(sequence++, 7)
         return next()
       })
       async getFunc(_, ctx: Context) {
@@ -59,7 +54,7 @@ describe('http-server router test suite', () => {
       }
     }
     
-    const koaRouter = router.getRouter()
+    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',
@@ -74,7 +69,7 @@ describe('http-server router test suite', () => {
     await koaRouter.routes()(ctx, (() => {}) as any)
   })
 
-  it('router dual method or path', async () => {
+  it('router multi method or path', async () => {
     let callCount = 0
     @router.controller('/a1')
     @router.controller('/a2')
@@ -82,12 +77,12 @@ describe('http-server router test suite', () => {
       @router.request('get', '/b')
       @router.request('post', '/c')
       @router.request('post', '/d')
-      async dualMethod(_, ctx) {
+      async multiMethod(state, ctx) {
         callCount++
       }
     }
 
-    const koaRouter = router.getRouter()
+    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
     const uris = [
       'GET /a1/b',
       'POST /a1/c',

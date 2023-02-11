@@ -10,11 +10,11 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@types/jaeger-client": "^3.18.3",
-    "nodemon": "^2.0.15"
+    "@types/jaeger-client": "^3.18.4",
+    "nodemon": "^2.0.20"
   },
   "dependencies": {
     "jaeger-client": "^3.19.0",
-    "koa": "^2.13.4"
+    "koa": "^2.14.1"
   }
 }

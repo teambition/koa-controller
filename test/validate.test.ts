@@ -1,15 +1,10 @@
 import 'mocha'
 import { strict as assert } from 'assert'
-import { KoaRouterManager } from '../src/router'
+import * as router from '../src/router'
 import { validate } from '../src/validate'
 import { Context } from 'koa'
 
 describe('http-server router test suite', () => {
-  let router: KoaRouterManager
-  beforeEach(() => {
-    router = new KoaRouterManager()
-  })
-
   it('decorator validator', async () => {
     @router.controller()
 
@@ -18,13 +13,13 @@ describe('http-server router test suite', () => {
       @validate({
         type: 'object',
         required: ['requiredProperty'],
-      }, { routerManager: router })
+      })
       async getFunc() {
         throw new Error('Should not enter here')
       }
     }
     
-    const koaRouter = router.getRouter()
+    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',
