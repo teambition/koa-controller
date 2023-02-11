@@ -1,10 +1,10 @@
 import type { Middleware as KoaMiddleware, Context as KoaContext, DefaultState } from 'koa'
-
-interface Logger {
+import * as _ from 'lodash'
+export interface Logger {
   info(...args): void
-  // debug(...args): void
-  // warn(...args): void
-  // error(...args): void
+  debug(...args): void
+  warn(...args): void
+  error(...args): void
 }
 
 interface Context extends KoaContext {
@@ -14,22 +14,43 @@ interface Context extends KoaContext {
 
 interface Middleware extends KoaMiddleware<DefaultState, Context> { }
 
-export function loggerMW({ logger }: { logger?: Logger } = {}): Middleware {
+interface Data {
+  status: number
+  method: string
+  routerName: string
+  duration: number
+  url: string
+  userAgent: string
+  [x: string]: any
+}
+
+export function loggerMW({
+  logger,
+  inject,
+}: {
+  logger?: Logger
+  inject?: (data: Data, ctx: KoaContext) => Data | Promise<Data>
+} = {}): Middleware {
   return async (ctx, next) => {
     const start = Date.now()
     try {
       await next()
     } finally {
-      if (!ctx.skipLogger) {
-        if (logger) logger.info({
-          status: ctx.status,
-          method: ctx.method,
-          routerName: ctx.routerName || 'unknown',
-          duration: Date.now() - start,
-          url: ctx.originalUrl,
-          userAgent: ctx.get('user-agent'),
-        })
+      if (ctx.skipLogger || !logger) return
+      let data = {
+        status: ctx.status,
+        method: ctx.method,
+        routerName: ctx.routerName || 'unknown',
+        duration: Date.now() - start,
+        url: ctx.originalUrl,
+        userAgent: ctx.get('user-agent'),
       }
+      try {
+        data = await inject(data, ctx)
+      } catch {
+        // ignore error log basic info
+      }
+      logger?.info(data)
     }
   }
 }

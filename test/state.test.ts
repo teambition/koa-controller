@@ -1,15 +1,10 @@
 import 'mocha'
 import { strict as assert } from 'assert'
-import { KoaRouterManager } from '../src/router'
+import * as router from '../src/router'
 import { state } from '../src/state'
 import { validateState } from '../src/validate'
 
 describe('http-server router test suite', () => {
-  let router: KoaRouterManager
-  beforeEach(() => {
-    router = new KoaRouterManager()
-  })
-
   it('state(kvMap)', async () => {
     @router.controller()
 
@@ -18,7 +13,7 @@ describe('http-server router test suite', () => {
       @state({
         queryKey: ['query.key'],
         bodyKey: ['request.body.key'],
-      }, router)
+      })
       async getFunc(state) {
         assert.ok(state)
         assert.equal(state.queryKey, undefined)
@@ -27,7 +22,7 @@ describe('http-server router test suite', () => {
       }
     }
     
-    const koaRouter = router.getRouter()
+    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',
@@ -44,7 +39,7 @@ describe('http-server router test suite', () => {
 
     class FakeController {
       @router.get('getFunc')
-      @state(null, router)
+      @state(null)
       async getFunc(state) {
         assert.ok(state)
         assert.equal(state.queryKey, undefined)
@@ -53,7 +48,7 @@ describe('http-server router test suite', () => {
       }
     }
     
-    const koaRouter = router.getRouter()
+    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',
@@ -70,14 +65,14 @@ describe('http-server router test suite', () => {
 
     class FakeController {
       @router.get('getFunc')
-      @state(null, router)
+      @state(null)
       @validateState({
         type: 'object',
         required: ['key'],
         properties: {
           key3: { type: 'integer' },
         },
-      }, { routerManager: router })
+      })
       async getFunc(state) {
         assert.ok(state)
         assert.equal(state.queryKey, undefined)
@@ -87,7 +82,7 @@ describe('http-server router test suite', () => {
       }
     }
     
-    const koaRouter = router.getRouter()
+    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',
@@ -104,14 +99,14 @@ describe('http-server router test suite', () => {
 
     class FakeController {
       @router.get('getFunc')
-      @state(null, router)
+      @state(null)
       @validateState({
         type: 'object',
         required: ['key'],
         properties: {
           key3: { type: 'integer' },
         },
-      }, { routerManager: router })
+      })
       async getFunc(state) {
         assert.ok(state)
         assert.equal(state.queryKey, undefined)
@@ -121,7 +116,7 @@ describe('http-server router test suite', () => {
       }
     }
     
-    const koaRouter = router.getRouter()
+    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',

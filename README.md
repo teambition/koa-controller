@@ -29,8 +29,6 @@ app.use(getRouterSync({
 ```
 
 ## Router
-### Class: KoaRouterManager
-Router Register Manager Class
 
 ### @controller(prefix?: string)
 Register a route on a class for router as a controller.
@@ -69,10 +67,8 @@ Register a before middleware, a after middleware or a middleware for a route whi
 if same decorator written 2 or more times, router will run in sequence from top to bottom.
 Please see `test/router.test.ts` file to learn more about it.
 
-- controller @middleware
-- controller @before
-- method @middleware
-- method @before
+- controller @middleware | @before
+- method @middleware | @before
 - method function
 - method @after
 - controller @after
