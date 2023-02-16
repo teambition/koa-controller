@@ -1,5 +1,5 @@
 import type { Middleware as KoaMiddleware, Context as KoaContext, DefaultState } from 'koa'
-import * as _ from 'lodash'
+
 export interface Logger {
   info(...args): void
   debug(...args): void
@@ -26,7 +26,7 @@ interface Data {
 
 export function loggerMW({
   logger,
-  inject,
+  inject = (d) => d,
 }: {
   logger?: Logger
   inject?: (data: Data, ctx: KoaContext) => Data | Promise<Data>
@@ -36,21 +36,22 @@ export function loggerMW({
     try {
       await next()
     } finally {
-      if (ctx.skipLogger || !logger) return
-      let data = {
-        status: ctx.status,
-        method: ctx.method,
-        routerName: ctx.routerName || 'unknown',
-        duration: Date.now() - start,
-        url: ctx.originalUrl,
-        userAgent: ctx.get('user-agent'),
+      if (!ctx.skipLogger) {
+        let data = {
+          status: ctx.status,
+          method: ctx.method,
+          routerName: ctx.routerName || 'unknown',
+          duration: Date.now() - start,
+          url: ctx.originalUrl,
+          userAgent: ctx.get('user-agent'),
+        }
+        try {
+          data = await inject(data, ctx)
+        } catch {
+          // ignore error log basic info
+        }
+        logger?.info(data)
       }
-      try {
-        data = await inject(data, ctx)
-      } catch {
-        // ignore error log basic info
-      }
-      logger?.info(data)
     }
   }
 }

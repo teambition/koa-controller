@@ -1,4 +1,5 @@
-import { controller, get, post, state, before, validateState, after } from '../../src'
+import { controller, get, post, state, before, validateState, after, middleware } from '../../src'
+import { als } from './als'
 
 // Home
 @controller('/')
@@ -21,12 +22,23 @@ export class HomeController {
 
 // user
 @controller('/user')
+@middleware(async (ctx, next) => {
+  // get trace id by als in any function
+  ctx.set('trace-id', als.getStore().traceId)
+  setTimeout(() => {
+    console.log('async job after api in 1 second in trace:', als.getStore().traceId)
+  }, 1000)
+  return next()
+})
 export class UserController {
   
   // http://localhost:3000/123?name=John
   // { id: 123, name: 'John' }
   @get('/:id')
   @state()
+  @after(async (ctx) => {
+    ctx.set('x-user-id', (ctx.body as any).id)
+  })
   @validateState({
     type: 'object',
     properties: {

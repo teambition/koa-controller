@@ -1,10 +1,11 @@
 {
   "name": "@tng/koa-controller",
-  "version": "0.1.1",
+  "version": "1.0.0-alpha.1",
   "description": "Write koa http server with koa-controller by decorator feature in typescript.",
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
+    "lint": "eslint src",
     "prepare": "npm run build",
     "test": "mocha",
     "test:coverage": "nyc mocha"
@@ -26,7 +27,10 @@
     "@types/koa-router": "^7.4.4",
     "@types/lodash": "^4.14.191",
     "@types/mocha": "^10.0.1",
-    "@types/node": "^18.13.0",
+    "@types/node": "^18.14.0",
+    "@typescript-eslint/eslint-plugin": "^5.53.0",
+    "@typescript-eslint/parser": "^5.53.0",
+    "eslint": "^8.34.0",
     "koa": "^2.14.1",
     "koa-bodyparser": "^4.3.0",
     "mocha": "^10.2.0",

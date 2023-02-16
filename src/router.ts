@@ -4,9 +4,7 @@ import * as Debug from 'debug'
 import * as KoaRouter from 'koa-router'
 import type { Context as KoaContext, DefaultState, Middleware as KoaMiddleware } from 'koa'
 import type { Span } from 'opentracing'
-import type { SchemaObject } from 'ajv'
-import type Ajv from 'ajv'
-import { Logger } from './logger'
+import type { Logger } from './logger'
 import { strict as assert } from'assert'
 
 interface Context extends KoaContext {
@@ -18,6 +16,8 @@ interface Middleware extends KoaMiddleware<DefaultState, Context> { }
 export interface MiddlewareFn {
   (ctx: Context): Promise<void>
 }
+
+type MiddlewareMaker = (options: {controllerName: string, propertyName?: string}) => Middleware
 
 const debug = Debug('koa:controller')
 const controllerSymbol = Symbol('controller')
@@ -65,8 +65,24 @@ export function controller(prefix = '/') {
   }
 }
 
-export function middleware(middleware: Middleware, pushToBottom = false) {
+export function middleware(middleware: Middleware) {
   const middlewareName = middleware.name || 'middleware'
+  return internalMiddleware(({controllerName, propertyName}) => async (ctx, next) => {
+    const mwFullpath = [controllerName, propertyName, middlewareName].filter(Boolean).join('/')
+    debug(`invoke controllerMiddleware ${mwFullpath}`)
+    const span = ctx.span?.tracer().startSpan(`${mwFullpath}`, { childOf: ctx.span })
+    span?.setTag('Controller', controllerName)
+    if (propertyName) {
+      span?.setTag('Method', propertyName)
+    }
+    span?.setTag('Middeware', middlewareName)
+    return middleware(ctx, next).finally(() => {
+      span?.finish()
+    })
+  })
+}
+
+function internalMiddleware(mwMaker: MiddlewareMaker, { pushToBottom = false } = {}) {
   return (target: any, propertyName?: string, descriptor?: PropertyDescriptor) => {
     if (typeof propertyName === 'undefined') {
       // class Decorator
@@ -74,16 +90,7 @@ export function middleware(middleware: Middleware, pushToBottom = false) {
       const controllerName = constructor.name
       debug(`@middleware for controller ${controllerName}`)
 
-      const mw: Middleware = async (ctx, next) => {
-        debug(`invoke controllerMiddleware ${controllerName}/${middlewareName}`)
-        const span = ctx.span?.tracer().startSpan(`${controllerName}/${middlewareName}`, { childOf: ctx.span })
-        span?.setTag('Controller', controllerName)
-        span?.setTag('Middeware', middlewareName)
-        return middleware(ctx, next).finally(() => {
-          span?.finish()
-        })
-      }
-      Object.defineProperty(mw, 'name', { value: middlewareName })
+      const mw = mwMaker({ controllerName })
 
       if (!Reflect.has(constructor, controllerSymbol)) {
         Reflect.set(constructor, controllerSymbol, new ControllerMeta())
@@ -99,17 +106,7 @@ export function middleware(middleware: Middleware, pushToBottom = false) {
       const controllerName = constructor.name
       debug(`@middleware for method ${controllerName}/${propertyName}`)
 
-      const mw: Middleware = async (ctx, next) => {
-        debug(`invoke methodMiddleware ${controllerName}/${propertyName}/${middlewareName}`)
-        const span = ctx.span?.tracer().startSpan(`${controllerName}/${propertyName}/${middlewareName}}`, { childOf: ctx.span })
-        span?.setTag('Controller', controllerName)
-        span?.setTag('Method', propertyName)
-        span?.setTag('Middeware', middlewareName)
-        return middleware(ctx, next).finally(() => {
-          span?.finish()
-        })
-      }
-      Object.defineProperty(mw, 'name', { value: middlewareName })
+      const mw = mwMaker({ controllerName })
 
       const controllerConstructor: ControllerConstructor = target.constructor
       if (!Reflect.has(controllerConstructor, controllerSymbol)) {
@@ -131,22 +128,36 @@ export function middleware(middleware: Middleware, pushToBottom = false) {
   
 export function before(beforeFunc: MiddlewareFn) {
   const beforeName = beforeFunc.name || 'before'
-  const mw: Middleware = async (ctx, next) => {
-    await beforeFunc(ctx)
+  const mwMaker: MiddlewareMaker = ({ controllerName, propertyName }) => async (ctx, next) => {
+    const mwFullpath = [controllerName, propertyName, beforeName].filter(Boolean).join('/')
+    debug(`invoke before ${mwFullpath}`)
+    const span = ctx.span?.tracer().startSpan(`${mwFullpath}`, { childOf: ctx.span })
+    span?.setTag('Controller', controllerName)
+    if (propertyName) {
+      span?.setTag('Method', propertyName)
+    }
+    span?.setTag('Before', beforeName)
+    await beforeFunc(ctx).finally(() => span?.finish())
     return next()
   }
-  Object.defineProperty(mw, 'name', { value: beforeName })
-  return middleware(mw)
+  return internalMiddleware(mwMaker)
 }
   
 export function after(afterFunc: MiddlewareFn) {
   const afterName = afterFunc.name || 'after'
-  const mw: Middleware = async (ctx, next) => {
+  const mwMaker: MiddlewareMaker = ({ controllerName, propertyName }) => async (ctx, next) => {
+    const mwFullpath = [controllerName, propertyName, afterName].filter(Boolean).join('/')
     await next()
-    await afterFunc(ctx)
+    debug(`invoke after ${mwFullpath}`)
+    const span = ctx.span?.tracer().startSpan(`${mwFullpath}`, { childOf: ctx.span })
+    span?.setTag('Controller', controllerName)
+    if (propertyName) {
+      span?.setTag('Method', propertyName)
+    }
+    span?.setTag('Before', afterName)
+    await afterFunc(ctx).finally(() => span?.finish())
   }
-  Object.defineProperty(mw, 'name', { value: afterName })
-  return middleware(mw, true)
+  return internalMiddleware(mwMaker, { pushToBottom: true })
 }
 
 export function request(verb = 'get', pathname = '/') {
