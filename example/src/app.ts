@@ -1,12 +1,11 @@
 import * as Koa from 'koa'
 import * as c from '../../src'
-import { AsyncLocalStorage } from 'async_hooks'
 import { initTracer, Reporter } from 'jaeger-client'
 import { Span } from 'opentracing'
+import { als } from './als'
 
 
 // support async local storage
-const als = new AsyncLocalStorage<any>()
 const consoleReporter: Reporter = {
   report(span: Span): void {
     const spanAny: any = span
@@ -16,6 +15,7 @@ const consoleReporter: Reporter = {
     callback && callback()
   },
   setProcess(serviceName: string, tags: any): void {
+    // ignore this method
   }
 }
 // support opentracing tracer like jaeger or zipkin

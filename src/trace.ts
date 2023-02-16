@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from 'async_hooks'
+import type { AsyncLocalStorage } from 'async_hooks'
 import { randomUUID } from 'crypto'
 import type { Middleware as KoaMiddleware, Context as KoaContext, DefaultState } from 'koa'
 import { Tracer, FORMAT_HTTP_HEADERS, Tags, Span } from 'opentracing'
@@ -11,7 +11,7 @@ interface Context extends KoaContext {
 
 interface Middleware extends KoaMiddleware<DefaultState, Context> { }
 
-export function alsMW<T = any>(als: AsyncLocalStorage<T>): Middleware {
+export function alsMW<T>(als: AsyncLocalStorage<T>): Middleware {
   return async (ctx, next) => {
     return als.run({} as any, () => {
       return next()
