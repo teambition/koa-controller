@@ -1,0 +1,12 @@
+{
+  "name": "koa-controller-example-cjs",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "ts-node src/app.ts"
+  },
+  "dependencies": {
+    "@tng/koa-controller": "file:../../",
+    "koa": "^2.14.1"
+  }
+}

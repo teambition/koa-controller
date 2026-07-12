@@ -1,13 +1,13 @@
 import 'mocha'
 import { strict as assert } from 'assert'
-import * as router from '../src/router'
-import { state } from '../src/state'
-import { validateState } from '../src/validate'
+import * as router from '../src/router.js'
+import { state } from '../src/state.js'
+import { validateState } from '../src/validate.js'
 
-describe('http-server router test suite', () => {
-  it('state(kvMap)', async () => {
+describe('state test suite', () => {
+  it('should map state keys from ctx paths with @state(kvMap)', async () => {
+    let capturedState: any
     @router.controller()
-
     class FakeController {
       @router.get('getFunc')
       @state({
@@ -15,14 +15,11 @@ describe('http-server router test suite', () => {
         bodyKey: ['request.body.key'],
       })
       async getFunc(state) {
-        assert.ok(state)
-        assert.equal(state.queryKey, undefined)
-        assert.equal(state.bodyKey, 'correct')
-        assert.equal(state.otherKey, undefined)
+        capturedState = state
       }
     }
     
-    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',
@@ -30,39 +27,126 @@ describe('http-server router test suite', () => {
       query: {},
       request: { body: { key: 'correct', key2: 'other' } },
     }
-    const next: any = () => { }
     await koaRouter.routes()(ctx, (() => {}) as any)
+
+    assert.ok(capturedState)
+    assert.equal(capturedState.queryKey, undefined)
+    assert.equal(capturedState.bodyKey, 'correct')
+    assert.equal(capturedState.otherKey, undefined)
   })
 
-  it('state()', async () => {
+  it('should merge query, body and params with @state() (null)', async () => {
+    let capturedState: any
     @router.controller()
-
     class FakeController {
       @router.get('getFunc')
       @state(null)
       async getFunc(state) {
-        assert.ok(state)
-        assert.equal(state.queryKey, undefined)
-        assert.equal(state.key, 'correct')
-        assert.equal(state.key2, 'other')
+        capturedState = state
       }
     }
     
-    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
+    const ctx: any = {
+      method: 'GET',
+      path: '/getFunc',
+      headers: {},
+      query: { q: 'queryVal' },
+      params: { id: '123' },
+      request: { body: { key: 'correct', key2: 'other' } },
+    }
+    await koaRouter.routes()(ctx, (() => {}) as any)
+
+    assert.ok(capturedState)
+    assert.equal(capturedState.q, 'queryVal')
+    assert.equal(capturedState.id, '123')
+    assert.equal(capturedState.key, 'correct')
+    assert.equal(capturedState.key2, 'other')
+  })
+
+  it('should support nested path lookup via lodash.get', async () => {
+    let capturedState: any
+    @router.controller()
+    class FakeController {
+      @router.get('getFunc')
+      @state({
+        nested: ['request.body.deeply.nested.key'],
+      })
+      async getFunc(state) {
+        capturedState = state
+      }
+    }
+    
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',
       headers: {},
       query: {},
-      request: { body: { key: 'correct', key2: 'other' } },
+      request: { body: { deeply: { nested: { key: 'deepValue' } } } },
     }
-    const next: any = () => { }
     await koaRouter.routes()(ctx, (() => {}) as any)
+
+    assert.equal(capturedState.nested, 'deepValue')
   })
 
-  it('validateState()', async () => {
+  it('should use first matching fromPath value', async () => {
+    let capturedState: any
     @router.controller()
+    class FakeController {
+      @router.get('getFunc')
+      @state({
+        val: ['query.missing', 'request.body.found'],
+      })
+      async getFunc(state) {
+        capturedState = state
+      }
+    }
+    
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
+    const ctx: any = {
+      method: 'GET',
+      path: '/getFunc',
+      headers: {},
+      query: {},
+      request: { body: { found: 'fallback-value' } },
+    }
+    await koaRouter.routes()(ctx, (() => {}) as any)
 
+    // first path 'query.missing' is undefined, second path 'request.body.found' has value
+    assert.equal(capturedState.val, 'fallback-value')
+  })
+
+  it('should map state from URL path params', async () => {
+    let capturedState: any
+    @router.controller()
+    class FakeController {
+      @router.get('getFunc')
+      @state({
+        userId: ['params.id'],
+      })
+      async getFunc(state) {
+        capturedState = state
+      }
+    }
+    
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
+    const ctx: any = {
+      method: 'GET',
+      path: '/getFunc',
+      headers: {},
+      query: {},
+      params: { id: '42' },
+      request: { body: {} },
+    }
+    await koaRouter.routes()(ctx, (() => {}) as any)
+
+    assert.equal(capturedState.userId, '42')
+  })
+
+  it('should validate state with @validateState (success)', async () => {
+    let capturedState: any
+    @router.controller()
     class FakeController {
       @router.get('getFunc')
       @state(null)
@@ -74,15 +158,11 @@ describe('http-server router test suite', () => {
         },
       })
       async getFunc(state) {
-        assert.ok(state)
-        assert.equal(state.queryKey, undefined)
-        assert.equal(state.key, 'correct')
-        assert.equal(state.key2, 'other')
-        assert.equal(state.key3, 123)
+        capturedState = state
       }
     }
     
-    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',
@@ -90,13 +170,16 @@ describe('http-server router test suite', () => {
       query: {},
       request: { body: { key: 'correct', key2: 'other', key3: '123' } },
     }
-    const next: any = () => { }
     await koaRouter.routes()(ctx, (() => {}) as any)
+
+    assert.ok(capturedState)
+    assert.equal(capturedState.key, 'correct')
+    assert.equal(capturedState.key2, 'other')
+    assert.equal(capturedState.key3, 123) // coerced to integer
   })
 
-  it('validateState() fail', async () => {
+  it('should reject with @validateState when required field missing', async () => {
     @router.controller()
-
     class FakeController {
       @router.get('getFunc')
       @state(null)
@@ -107,16 +190,10 @@ describe('http-server router test suite', () => {
           key3: { type: 'integer' },
         },
       })
-      async getFunc(state) {
-        assert.ok(state)
-        assert.equal(state.queryKey, undefined)
-        assert.equal(state.key, 'correct')
-        assert.equal(state.key2, 'other')
-        assert.equal(state.key3, 123)
-      }
+      async getFunc(state) {}
     }
     
-    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',

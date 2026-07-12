@@ -1,23 +1,18 @@
 {
+  "extends": "./tsconfig.build.json",
   "ts-node": {
     "transpileOnly": true,
     "files": true
   },
   "compilerOptions": {
-    "target": "ESNext",
-    "lib": ["es7"],
-    "rootDir": "src",
-    "outDir": "lib",
-    "module": "commonjs",
-    "moduleResolution": "node",
-    "declaration": true,
-    "sourceMap": true,
-    "inlineSources": true,
-    "experimentalDecorators": true,
-    "skipLibCheck": true,
+    "rootDir": ".",
+    "outDir": ".tsbuild",
+    "declaration": false,
+    "esModuleInterop": true,
   },
   "include": [
     "src/**/*",
+    "test/**/*",
     "@types/**/*",
   ],
 }

@@ -1,11 +1,13 @@
-import * as path from 'path'
-import * as glob from 'glob'
-import * as Debug from 'debug'
-import * as KoaRouter from 'koa-router'
+import path from 'path'
+import { pathToFileURL } from 'node:url'
+import glob from 'glob'
+import Debug from 'debug'
+import KoaRouter from 'koa-router'
 import type { Context as KoaContext, DefaultState, Middleware as KoaMiddleware } from 'koa'
 import type { Span } from 'opentracing'
-import type { Logger } from './logger'
+import type { Logger } from './logger.js'
 import { strict as assert } from'assert'
+import { createRequire } from 'node:module'
 
 interface Context extends KoaContext {
   span?: Span
@@ -25,7 +27,7 @@ const controllerSymbol = Symbol('controller')
 interface Controller {
 }
 
-interface ControllerConstructor extends Function {
+interface ControllerConstructor {
   new (): Controller
   [controllerSymbol]?: ControllerMeta
 }
@@ -83,7 +85,8 @@ export function middleware(middleware: Middleware) {
 }
 
 function internalMiddleware(mwMaker: MiddlewareMaker, { pushToBottom = false } = {}) {
-  return (target: any, propertyName?: string, descriptor?: PropertyDescriptor) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
+  return (target: any, propertyName?: string, _descriptor?: PropertyDescriptor) => {
     if (typeof propertyName === 'undefined') {
       // class Decorator
       const constructor: ControllerConstructor = target
@@ -163,7 +166,8 @@ export function after(afterFunc: MiddlewareFn) {
 export function request(verb = 'get', pathname = '/') {
   assert.ok(verb)
   assert.ok(pathname)
-  return (target: any, propertyName: string, descriptor: PropertyDescriptor) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
+  return (target: any, propertyName: string, _descriptor?: PropertyDescriptor) => {
     const controllerConstructor: ControllerConstructor = target.constructor
     debug(`@request ${controllerConstructor.name}/${propertyName} ${verb} ${pathname}`)
     if (!Reflect.has(controllerConstructor, controllerSymbol)) {
@@ -189,9 +193,9 @@ export function post(path = '/') {
   return request('post', path)
 }
 
-export function getRouter({
+export function loadRouter({
   prefix = '',
-  logger,
+  logger: _logger,
   controllerConstructors,
 }: {
   prefix?: string
@@ -246,21 +250,55 @@ export function getRouterSync({
   cwd?: string
   files?: string
   prefix?: string
-  logger?: any
+  logger?: Logger
 } = {}) {
   const controllerConstructors: ControllerConstructor[] = []
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore TS1343 — import.meta only in ESM, stripped for CJS build
+  const metaUrl: string = import.meta?.url ?? ''
+  const localRequire: NodeRequire = metaUrl ? createRequire(metaUrl) as NodeRequire : require as NodeRequire
   glob.sync(files, { cwd }).forEach(file => {
     debug(`getRouterSync: load file ${file} ...`)
-    const exportObject = require(path.resolve(cwd, file))
-    if (typeof exportObject === 'function') { 
-      controllerConstructors.push(exportObject)
-    } else if (typeof exportObject === 'object') {
-      Object.values(exportObject)
-        .filter(exportMember => typeof exportMember === 'function')
-        .forEach((exportMember: ControllerConstructor) => {
-          controllerConstructors.push(exportMember)
-        })
-    }
+    collectExports(localRequire(path.resolve(cwd, file)), controllerConstructors)
   })
-  return getRouter({ prefix, controllerConstructors, logger })
+  return loadRouter({ prefix, controllerConstructors, logger })
+}
+
+/**
+ * Async version of getRouterSync. Uses dynamic import() to load controller files,
+ * works in both CJS and ESM projects. Controller files can use either module syntax.
+ */
+export async function getRouterAsync({
+  cwd = process.cwd(),
+  files = 'api/**/*.[jt]s',
+  prefix = '',
+  logger
+}: {
+  cwd?: string
+  files?: string
+  prefix?: string
+  logger?: Logger
+} = {}): Promise<KoaRouter> {
+  const controllerConstructors: ControllerConstructor[] = []
+  const matchedFiles = glob.sync(files, { cwd })
+  for (const file of matchedFiles) {
+    debug(`loadControllers: load file ${file} ...`)
+    const fileUrl = pathToFileURL(path.resolve(cwd, file)).href
+    const exportObject = await import(fileUrl)
+    collectExports(exportObject, controllerConstructors)
+  }
+  return loadRouter({ prefix, controllerConstructors, logger })
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function collectExports(exportObject: any, controllerConstructors: ControllerConstructor[]) {
+  if (typeof exportObject === 'function') {
+    controllerConstructors.push(exportObject)
+  } else if (typeof exportObject === 'object') {
+    Object.values(exportObject)
+      .filter(exportMember => typeof exportMember === 'function')
+      .forEach((exportMember: ControllerConstructor) => {
+        controllerConstructors.push(exportMember)
+      })
+  }
 }

@@ -1,10 +1,13 @@
 import 'mocha'
 import { strict as assert } from 'assert'
-import * as router from '../src/router'
+import * as router from '../src/router.js'
 import { Context } from 'koa'
+import { mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 
-describe('http-server router test suite', () => {
-  it('router sequence', async () => {
+describe('router test suite', () => {
+  it('should execute decorators in correct sequence', async () => {
     let sequence = 0
     @router.controller()
     @router.before(async (ctx) => {
@@ -54,7 +57,7 @@ describe('http-server router test suite', () => {
       }
     }
     
-    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
     const ctx: any = {
       method: 'GET',
       path: '/getFunc',
@@ -65,11 +68,10 @@ describe('http-server router test suite', () => {
         k2: 'v2',
       } },
     }
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
     await koaRouter.routes()(ctx, (() => {}) as any)
   })
 
-  it('router multi method or path', async () => {
+  it('should support multiple controllers and methods', async () => {
     let callCount = 0
     @router.controller('/a1')
     @router.controller('/a2')
@@ -82,7 +84,7 @@ describe('http-server router test suite', () => {
       }
     }
 
-    const koaRouter = router.getRouter({ controllerConstructors: [FakeController] })
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
     const uris = [
       'GET /a1/b',
       'POST /a1/c',
@@ -101,9 +103,168 @@ describe('http-server router test suite', () => {
         query: {},
         request: { body: { } },
       }
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
       await koaRouter.routes()(ctx1, (() => {}) as any)
       assert.equal(callCount, Number(idx) + 1)
     }
+  })
+
+  it('should support router prefix option', async () => {
+    @router.controller()
+    class FakeController {
+      @router.get('hello')
+      async hello() { return 'world' }
+    }
+
+    const koaRouter = router.loadRouter({
+      prefix: '/api',
+      controllerConstructors: [FakeController],
+    })
+    const ctx: any = {
+      method: 'GET',
+      path: '/api/hello',
+      headers: {},
+      query: {},
+      request: { body: {} },
+    }
+    await koaRouter.routes()(ctx, (() => {}) as any)
+    assert.equal(ctx.body, 'world')
+  })
+
+  it('should skip non-function constructor entries', () => {
+    const koaRouter = router.loadRouter({
+      controllerConstructors: [null as any, undefined as any, 'string' as any],
+    })
+    assert.ok(koaRouter)
+  })
+
+  it('should skip constructor without controller meta', () => {
+    class PlainClass {
+      foo() { return 'bar' }
+    }
+
+    const koaRouter = router.loadRouter({
+      controllerConstructors: [PlainClass],
+    })
+    assert.ok(koaRouter)
+  })
+
+  it('should skip method that is not a function', () => {
+    @router.controller()
+    class FakeController {
+      notAFunction = 'im a string'
+      @router.get('notAFunction')
+      async realMethod() { return 'ok' }
+    }
+
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
+    assert.ok(koaRouter)
+  })
+
+  it('should prevent duplicate controller prefixes', () => {
+    @router.controller('/same')
+    @router.controller('/same')
+    class FakeController {
+      @router.get('func')
+      async func() { return 'ok' }
+    }
+
+    const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
+    assert.ok(koaRouter)
+  })
+
+  describe('getRouterSync', () => {
+    let tmpDir: string
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(tmpdir(), 'koa-ctrl-test-'))
+    })
+
+    afterEach(() => {
+      rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    it('should scan files via glob and load function exports', () => {
+      writeFileSync(join(tmpDir, 'test.js'), `
+module.exports = function FakeController() {}
+`)
+      const koaRouter = router.getRouterSync({ cwd: tmpDir, files: '**/*.js' })
+      assert.ok(koaRouter)
+    })
+
+    it('should load named exports and skip non-function values', () => {
+      writeFileSync(join(tmpDir, 'api.js'), `
+class C1 {}
+class C2 {}
+exports.C1 = C1
+exports.C2 = C2
+exports.NotAFunc = 'string'
+`)
+      const koaRouter = router.getRouterSync({ cwd: tmpDir, files: '**/*.js' })
+      assert.ok(koaRouter)
+    })
+
+    it('should apply prefix option', () => {
+      writeFileSync(join(tmpDir, 'home.js'), `
+module.exports = function FakeController() {}
+`)
+      const koaRouter = router.getRouterSync({ cwd: tmpDir, files: '**/*.js', prefix: '/api' })
+      assert.ok(koaRouter)
+    })
+
+    it('should return empty router for unmatched glob', () => {
+      const koaRouter = router.getRouterSync({ cwd: tmpDir, files: 'nonexistent/**/*.js' })
+      assert.ok(koaRouter)
+    })
+  })
+
+  describe('getRouterAsync', () => {
+    let tmpDir: string
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(process.cwd(), '.test-tmp-'))
+    })
+
+    afterEach(() => {
+      rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    it('should load ESM controller files via import()', async () => {
+      writeFileSync(join(tmpDir, 'home.ts'), `
+import { controller, get } from '../src/index.js'
+
+@controller('/')
+export class HomeController {
+  @get('/')
+  async index() { return 'hello from esm' }
+}
+`)
+
+      const koaRouter = await router.getRouterAsync({ cwd: tmpDir, files: '**/*.ts' })
+      const ctx: any = { method: 'GET', path: '/', headers: {}, query: {}, request: { body: {} } }
+      await koaRouter.routes()(ctx, (() => {}) as any)
+      assert.equal(ctx.body, 'hello from esm')
+    })
+
+    it('should support prefix option', async () => {
+      writeFileSync(join(tmpDir, 'api.ts'), `
+import { controller, get } from '../src/index.js'
+
+@controller('/api')
+export class ApiController {
+  @get('/')
+  async index() { return 'prefixed' }
+}
+`)
+
+      const koaRouter = await router.getRouterAsync({ cwd: tmpDir, files: '**/*.ts', prefix: '/v1' })
+      const ctx: any = { method: 'GET', path: '/v1/api/', headers: {}, query: {}, request: { body: {} } }
+      await koaRouter.routes()(ctx, (() => {}) as any)
+      assert.equal(ctx.body, 'prefixed')
+    })
+
+    it('should return empty router for unmatched glob', async () => {
+      const koaRouter = await router.getRouterAsync({ cwd: tmpDir, files: 'nonexistent/**/*.ts' })
+      assert.ok(koaRouter)
+    })
   })
 })

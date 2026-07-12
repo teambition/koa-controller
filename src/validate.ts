@@ -1,6 +1,7 @@
-import Ajv, { SchemaObject } from 'ajv'
-import * as createHttpError from 'http-errors'
-import { before } from './router'
+import { Ajv } from 'ajv'
+import type { SchemaObject } from 'ajv'
+import createHttpError from 'http-errors'
+import { before } from './router.js'
 
 export const globalAjvInstance = new Ajv({
   coerceTypes: true,
@@ -25,7 +26,7 @@ export function validate(jsonSchema: SchemaObject, {
 export function validateState(jsonSchema: SchemaObject, {
   ajv = globalAjvInstance,
 }: {
-  ajv?: Ajv
+  ajv?: typeof globalAjvInstance
 } = {}) {
   const validate = ajv.compile(jsonSchema)
   return before(async function validateStateMW (ctx) {

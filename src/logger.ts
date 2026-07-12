@@ -21,7 +21,7 @@ interface Data {
   duration: number
   url: string
   userAgent: string
-  [x: string]: any
+  [x: string]: unknown
 }
 
 export function loggerMW({

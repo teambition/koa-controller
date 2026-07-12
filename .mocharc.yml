@@ -2,9 +2,6 @@
 spec:
 # - test/**/*.test.js
 - test/**/*.test.ts
-require:
-- ts-node/register
-# - test/init.ts
 recursive: true
 exit: true
 

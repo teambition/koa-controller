@@ -1,5 +1,5 @@
-import * as lodash from 'lodash'
-import { before } from './router'
+import lodash from 'lodash'
+import { before } from './router.js'
 
 export function state(params?: Record<string, string[]>) {
   return before(async function stateMW (ctx) {
@@ -7,7 +7,7 @@ export function state(params?: Record<string, string[]>) {
       ctx.state = Object.assign({}, ctx.query, ctx.request.body, ctx.params)
       return
     }
-    ctx.state = Object.entries(params).reduce<Record<string, any>>((result, [key, fromPaths]) => {
+    ctx.state = Object.entries(params).reduce<Record<string, unknown>>((result, [key, fromPaths]) => {
       for (const fromPath of fromPaths) {
         result[key] = lodash.get(ctx, fromPath, undefined)  
       }

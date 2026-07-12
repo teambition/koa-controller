@@ -13,13 +13,13 @@ interface Middleware extends KoaMiddleware<DefaultState, Context> { }
 
 export function alsMW<T>(als: AsyncLocalStorage<T>): Middleware {
   return async (ctx, next) => {
-    return als.run({} as any, () => {
+    return als.run({} as T, () => {
       return next()
     })
   }
 }
 
-export function traceMW(tracer: Tracer, { zipkinHeaderEnable, als }: { zipkinHeaderEnable?: boolean, als?: AsyncLocalStorage<any> } = {}): Middleware {
+export function traceMW<T extends { span?: Span, traceId?: string }>(tracer: Tracer, { zipkinHeaderEnable, als }: { zipkinHeaderEnable?: boolean, als?: AsyncLocalStorage<T> } = {}): Middleware {
   return async function traceMW (ctx, next) {
     let parentSpanContext = tracer.extract(FORMAT_HTTP_HEADERS, ctx.headers)
     if (!parentSpanContext?.toTraceId() && zipkinHeaderEnable) {

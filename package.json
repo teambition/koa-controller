@@ -2,19 +2,29 @@
   "name": "@tng/koa-controller",
   "version": "1.0.0-alpha.1",
   "description": "Write koa http server with koa-controller by decorator feature in typescript.",
-  "main": "lib/index.js",
+  "type": "module",
+  "main": "lib/index.cjs",
+  "module": "lib/index.js",
+  "exports": {
+    ".": {
+      "import": "./lib/index.js",
+      "require": "./lib/index.cjs",
+      "types": "./lib/index.d.ts"
+    }
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "node scripts/build.mjs",
     "lint": "eslint src",
     "prepare": "npm run build",
-    "test": "mocha",
-    "test:coverage": "nyc mocha"
+    "test": "NODE_OPTIONS=\"--loader=ts-node/esm\" mocha",
+    "test:coverage": "NODE_OPTIONS=\"--loader=ts-node/esm\" c8 --reporter=text-summary --reporter=html --reporter=lcov mocha"
   },
   "dependencies": {
     "ajv": "^8.12.0",
     "debug": "^4.3.4",
     "glob": "^8.1.0",
-    "koa-router": "^12.0.0",
+    "http-errors": "^2.0.1",
+    "koa-router": "^12.0.1",
     "lodash": "^4.17.21",
     "opentracing": "^0.14.7"
   },
@@ -28,15 +38,15 @@
     "@types/lodash": "^4.14.191",
     "@types/mocha": "^10.0.1",
     "@types/node": "^18.14.0",
-    "@typescript-eslint/eslint-plugin": "^5.53.0",
-    "@typescript-eslint/parser": "^5.53.0",
-    "eslint": "^8.34.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "c8": "^11.0.0",
+    "eslint": "^8.56.0",
     "koa": "^2.14.1",
     "koa-bodyparser": "^4.3.0",
     "mocha": "^10.2.0",
-    "nyc": "^15.1.0",
-    "ts-node": "^10.9.1",
-    "typescript": "^4.9.5"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.2"
   },
   "author": {
     "name": "Orange Mi",
@@ -50,5 +60,8 @@
   "bugs": {
     "url": "https://github.com/teambition/koa-controller/issues"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "files": [
+    "lib"
+  ]
 }

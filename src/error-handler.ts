@@ -3,7 +3,7 @@ import type { Middleware } from 'koa'
 export function errorHandlerMW({
   logger,
 }: {
-  logger?: any
+  logger?: { error: (...args: unknown[]) => void }
 } = {}): Middleware {
   return async (ctx, next) => {
     try {
