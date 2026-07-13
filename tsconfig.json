@@ -9,6 +9,7 @@
     "outDir": ".tsbuild",
     "declaration": false,
     "esModuleInterop": true,
+    "types": ["node", "mocha", "koa-bodyparser"],
   },
   "include": [
     "src/**/*",

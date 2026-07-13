@@ -7,13 +7,13 @@ import type { Middleware as KoaMiddleware, Context as KoaContext, DefaultState }
  */
 export interface Logger {
   /** Writes an informational log entry. */
-  info(...args): void
+  info(...args: unknown[]): void
   /** Writes a debug log entry. */
-  debug(...args): void
+  debug(...args: unknown[]): void
   /** Writes a warning log entry. */
-  warn(...args): void
+  warn(...args: unknown[]): void
   /** Writes an error log entry. */
-  error(...args): void
+  error(...args: unknown[]): void
 }
 
 interface Context extends KoaContext {
@@ -21,7 +21,7 @@ interface Context extends KoaContext {
   routerName?: string
 }
 
-interface Middleware extends KoaMiddleware<DefaultState, Context> { }
+type Middleware = KoaMiddleware<DefaultState, Context>
 
 interface Data {
   status: number

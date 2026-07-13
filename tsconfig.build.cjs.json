@@ -3,7 +3,7 @@
   "compilerOptions": {
     "outDir": "lib-cjs",
     "module": "CommonJS",
-    "moduleResolution": "node",
+    "moduleResolution": "Bundler",
     "declaration": false,
     "esModuleInterop": true,
   },

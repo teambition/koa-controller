@@ -1,6 +1,6 @@
 import path from 'path'
 import { pathToFileURL } from 'node:url'
-import glob from 'glob'
+import { globSync } from 'glob'
 import Debug from 'debug'
 import KoaRouter from 'koa-router'
 import type { Context as KoaContext, DefaultState, Middleware as KoaMiddleware } from 'koa'
@@ -13,7 +13,7 @@ interface Context extends KoaContext {
   span?: Span
   routePath?: string
 }
-interface Middleware extends KoaMiddleware<DefaultState, Context> { }
+type Middleware = KoaMiddleware<DefaultState, Context>
 
 /**
  * A function used by {@link before} and {@link after}.
@@ -31,8 +31,7 @@ type MiddlewareMaker = (options: {controllerName: string, propertyName?: string}
 const debug = Debug('koa:controller')
 const controllerSymbol = Symbol('controller')
 
-interface Controller {
-}
+type Controller = object
 
 interface ControllerConstructor {
   new (): Controller
@@ -43,6 +42,15 @@ class ControllerMeta {
   prefixs: string[] = []
   middlewares: Middleware[] = []
   methodMetaMap: Map<string, MethodMeta> = new Map()
+}
+
+function ensureControllerMeta(constructor: ControllerConstructor): ControllerMeta {
+  let meta = constructor[controllerSymbol]
+  if (!meta) {
+    meta = new ControllerMeta()
+    constructor[controllerSymbol] = meta
+  }
+  return meta
 }
 
 class Route {
@@ -90,12 +98,9 @@ export function controller(prefix = '/') {
   assert.ok(prefix)
   return (constructor: ControllerConstructor) => {
     debug(`@controller ${constructor.name} prefix = ${prefix}`)
-    if (!Reflect.has(constructor, controllerSymbol)) {
-      Reflect.set(constructor, controllerSymbol, new ControllerMeta())
-    }
-
-    if (!Reflect.get(constructor, controllerSymbol).prefixs.includes(prefix)) {
-      Reflect.get(constructor, controllerSymbol).prefixs.push(prefix)
+    const controllerMeta = ensureControllerMeta(constructor)
+    if (!controllerMeta.prefixs.includes(prefix)) {
+      controllerMeta.prefixs.push(prefix)
     }
   }
 }
@@ -152,13 +157,11 @@ function internalMiddleware(mwMaker: MiddlewareMaker, { pushToBottom = false } =
 
       const mw = mwMaker({ controllerName })
 
-      if (!Reflect.has(constructor, controllerSymbol)) {
-        Reflect.set(constructor, controllerSymbol, new ControllerMeta())
-      }
+      const controllerMeta = ensureControllerMeta(constructor)
       if (pushToBottom) {
-        Reflect.get(constructor, controllerSymbol).middlewares.push(mw)
+        controllerMeta.middlewares.push(mw)
       } else {
-        Reflect.get(constructor, controllerSymbol).middlewares.unshift(mw)
+        controllerMeta.middlewares.unshift(mw)
       }
     } else {
       // method Decorator
@@ -169,18 +172,17 @@ function internalMiddleware(mwMaker: MiddlewareMaker, { pushToBottom = false } =
       const mw = mwMaker({ controllerName })
 
       const controllerConstructor: ControllerConstructor = target.constructor
-      if (!Reflect.has(controllerConstructor, controllerSymbol)) {
-        Reflect.set(controllerConstructor, controllerSymbol, new ControllerMeta())
-      }
-      const methodMetaMap = Reflect.get(controllerConstructor, controllerSymbol).methodMetaMap
+      const methodMetaMap = ensureControllerMeta(controllerConstructor).methodMetaMap
       if (!methodMetaMap.has(propertyName)) {
         methodMetaMap.set(propertyName, new MethodMeta())
       }
+      const methodMeta = methodMetaMap.get(propertyName)
+      assert.ok(methodMeta)
 
       if (pushToBottom) {
-        methodMetaMap.get(propertyName).middlewares.push(mw)
+        methodMeta.middlewares.push(mw)
       } else {
-        methodMetaMap.get(propertyName).middlewares.unshift(mw)
+        methodMeta.middlewares.unshift(mw)
       }
     }
   }
@@ -293,15 +295,14 @@ export function request(verb = 'get', pathname = '/') {
   return (target: any, propertyName: string, _descriptor?: PropertyDescriptor) => {
     const controllerConstructor: ControllerConstructor = target.constructor
     debug(`@request ${controllerConstructor.name}/${propertyName} ${verb} ${pathname}`)
-    if (!Reflect.has(controllerConstructor, controllerSymbol)) {
-      Reflect.set(controllerConstructor, controllerSymbol, new ControllerMeta())
-    }
-    const methodMetaMap = Reflect.get(controllerConstructor, controllerSymbol).methodMetaMap
+    const methodMetaMap = ensureControllerMeta(controllerConstructor).methodMetaMap
     if (!methodMetaMap.has(propertyName)) {
       methodMetaMap.set(propertyName, new MethodMeta())
     }
+    const methodMeta = methodMetaMap.get(propertyName)
+    assert.ok(methodMeta)
 
-    methodMetaMap.get(propertyName).routes.push(new Route({
+    methodMeta.routes.push(new Route({
       verb,
       pathname,
     }))
@@ -394,10 +395,12 @@ export function loadRouter({
     const controller = new controllerConstructor()
     const controllerName = controllerConstructor.name
     const controllerMiddlewares = controllerMeta.middlewares || []
+    const controllerMethods = controller as Record<string, unknown>
 
     controllerMeta.methodMetaMap.forEach((methodMeta, propertyName) => {
       debug('getRouter method', methodMeta)
-      if (typeof controller[propertyName] !== 'function') return
+      const controllerMethod = controllerMethods[propertyName]
+      if (typeof controllerMethod !== 'function') return
       const routerName = controllerName + '/' + propertyName
       const methodMiddlewares = methodMeta.middlewares || []
 
@@ -406,7 +409,7 @@ export function loadRouter({
         const span = ctx.span?.tracer().startSpan(routerName, { childOf: ctx.span })
         span?.setTag('Controller', controllerName)
         span?.setTag('Method', propertyName)
-        ctx.body = await controller[propertyName](ctx.state, ctx).finally(() => {
+        ctx.body = await Promise.resolve(controllerMethod.call(controller, ctx.state, ctx)).finally(() => {
           span?.finish()
         })
       }
@@ -468,7 +471,7 @@ export function getRouterSync({
   // @ts-ignore TS1343 — import.meta only in ESM, stripped for CJS build
   const metaUrl: string = import.meta?.url ?? ''
   const localRequire: NodeRequire = metaUrl ? createRequire(metaUrl) as NodeRequire : require as NodeRequire
-  glob.sync(files, { cwd }).forEach(file => {
+  globSync(files, { cwd }).forEach(file => {
     debug(`getRouterSync: load file ${file} ...`)
     collectExports(localRequire(path.resolve(cwd, file)), controllerConstructors)
   })
@@ -516,7 +519,7 @@ export async function getRouterAsync({
   logger?: Logger
 } = {}): Promise<KoaRouter> {
   const controllerConstructors: ControllerConstructor[] = []
-  const matchedFiles = glob.sync(files, { cwd })
+  const matchedFiles = globSync(files, { cwd })
   for (const file of matchedFiles) {
     debug(`loadControllers: load file ${file} ...`)
     const fileUrl = pathToFileURL(path.resolve(cwd, file)).href
@@ -529,12 +532,12 @@ export async function getRouterAsync({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function collectExports(exportObject: any, controllerConstructors: ControllerConstructor[]) {
   if (typeof exportObject === 'function') {
-    controllerConstructors.push(exportObject)
+    controllerConstructors.push(exportObject as ControllerConstructor)
   } else if (typeof exportObject === 'object') {
-    Object.values(exportObject)
-      .filter(exportMember => typeof exportMember === 'function')
-      .forEach((exportMember: ControllerConstructor) => {
-        controllerConstructors.push(exportMember)
-      })
+    Object.values(exportObject).forEach(exportMember => {
+      if (typeof exportMember === 'function') {
+        controllerConstructors.push(exportMember as ControllerConstructor)
+      }
+    })
   }
 }

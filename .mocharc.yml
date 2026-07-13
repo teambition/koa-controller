@@ -1,4 +1,5 @@
 ---
+loader: ts-node/esm
 spec:
 # - test/**/*.test.js
 - test/**/*.test.ts

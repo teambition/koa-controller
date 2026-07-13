@@ -1,7 +1,7 @@
 import 'mocha'
 import { strict as assert } from 'assert'
 import { errorHandlerMW } from '../src/error-handler.js'
-import { Context } from 'koa'
+import type { Context } from 'koa'
 
 describe('error-handler test suite', () => {
   it('should catch error and set 500 status with body', async () => {

@@ -1,7 +1,7 @@
 import 'mocha'
 import { strict as assert } from 'assert'
 import * as router from '../src/router.js'
-import { Context } from 'koa'
+import type { Context } from 'koa'
 import { mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -52,7 +52,7 @@ describe('router test suite', () => {
         assert.equal(sequence++, 7)
         return next()
       })
-      async getFunc(_, ctx: Context) {
+      async getFunc(_: unknown, ctx: Context) {
         assert.equal(sequence++, 8)
       }
     }
@@ -79,7 +79,7 @@ describe('router test suite', () => {
       @router.request('get', '/b')
       @router.request('post', '/c')
       @router.request('post', '/d')
-      async multiMethod(state, ctx) {
+      async multiMethod(_state: unknown, _ctx: Context) {
         callCount++
       }
     }

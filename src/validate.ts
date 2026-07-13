@@ -1,3 +1,4 @@
+import assert from 'assert'
 import { Ajv } from 'ajv'
 import type { SchemaObject } from 'ajv'
 import createHttpError from 'http-errors'
@@ -58,9 +59,10 @@ export function validate(jsonSchema: SchemaObject, {
   const validate = ajv.compile(jsonSchema)
   return before(async function validateMW (ctx) {
     if (!validate(ctx)) {
-      const error = validate.errors[0]
-      error.message = (error.instancePath || '/') + ' ' + error.message
-      throw createHttpError(400, error.message, { ...error })
+      const error = validate.errors?.[0]
+      assert(error, 'internal validation failed')
+      const message = (error.instancePath || '/') + ' ' + error.message
+      throw createHttpError(400, message, { ...error, message })
     }
   })
 }
@@ -110,9 +112,10 @@ export function validateState(jsonSchema: SchemaObject, {
   const validate = ajv.compile(jsonSchema)
   return before(async function validateStateMW (ctx) {
     if (!validate(ctx.state)) {
-      const error = validate.errors[0]
-      error.message = (error.instancePath || '/') + ' ' + error.message
-      throw createHttpError(400, error.message, { ...error })
+      const error = validate.errors?.[0]
+      assert(error, 'internal validation failed')
+      const message = (error.instancePath || '/') + ' ' + error.message
+      throw createHttpError(400, message, { ...error, message })
     }
   })
 }
