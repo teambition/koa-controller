@@ -34,12 +34,13 @@ export function errorHandlerMW({
     try {
       await next()
     } catch (e) {
-      const status = ctx.status = e.status || 500
+      const error = normalizeError(e)
+      const status = ctx.status = typeof error.status === 'number' ? error.status : 500
       ctx.body = {
-        error: e.message
+        error: error.message
       }
       if (status >= 500) {
-        if (logger) logger.error(Object.assign(e, {
+        if (logger) logger.error(Object.assign(error, {
           method: ctx.method,
           url: ctx.url,
           headers: ctx.headers,
@@ -48,4 +49,21 @@ export function errorHandlerMW({
       }
     }
   }
+}
+
+type ErrorWithStatus = Error & { status?: number }
+
+function normalizeError(value: unknown): ErrorWithStatus {
+  if (value instanceof Error) return value
+
+  const error = new Error(
+    typeof value === 'object' && value !== null && 'message' in value
+      ? String(value.message)
+      : String(value)
+  ) as ErrorWithStatus
+
+  if (typeof value === 'object' && value !== null) {
+    Object.assign(error, value)
+  }
+  return error
 }

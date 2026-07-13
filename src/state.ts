@@ -44,7 +44,7 @@ import { before } from './router.js'
  * }
  * ```
  */
-export function state(params?: Record<string, string[]>) {
+export function state(params?: Record<string, string[]> | null) {
   return before(async function stateMW (ctx) {
     if (!params) {
       ctx.state = Object.assign({}, ctx.query, ctx.request.body, ctx.params)

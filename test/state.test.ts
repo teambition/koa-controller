@@ -14,7 +14,7 @@ describe('state test suite', () => {
         queryKey: ['query.key'],
         bodyKey: ['request.body.key'],
       })
-      async getFunc(state) {
+      async getFunc(state: any) {
         capturedState = state
       }
     }
@@ -41,7 +41,7 @@ describe('state test suite', () => {
     class FakeController {
       @router.get('getFunc')
       @state(null)
-      async getFunc(state) {
+      async getFunc(state: any) {
         capturedState = state
       }
     }
@@ -72,7 +72,7 @@ describe('state test suite', () => {
       @state({
         nested: ['request.body.deeply.nested.key'],
       })
-      async getFunc(state) {
+      async getFunc(state: any) {
         capturedState = state
       }
     }
@@ -98,7 +98,7 @@ describe('state test suite', () => {
       @state({
         val: ['query.missing', 'request.body.found'],
       })
-      async getFunc(state) {
+      async getFunc(state: any) {
         capturedState = state
       }
     }
@@ -125,7 +125,7 @@ describe('state test suite', () => {
       @state({
         userId: ['params.id'],
       })
-      async getFunc(state) {
+      async getFunc(state: any) {
         capturedState = state
       }
     }
@@ -157,7 +157,7 @@ describe('state test suite', () => {
           key3: { type: 'integer' },
         },
       })
-      async getFunc(state) {
+      async getFunc(state: any) {
         capturedState = state
       }
     }
@@ -190,7 +190,7 @@ describe('state test suite', () => {
           key3: { type: 'integer' },
         },
       })
-      async getFunc(state) {}
+      async getFunc(_state: any) {}
     }
     
     const koaRouter = router.loadRouter({ controllerConstructors: [FakeController] })
