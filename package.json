@@ -15,7 +15,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "lint": "eslint src",
-    "prepare": "npm run build",
+    "prepack": "npm run build",
     "test": "NODE_OPTIONS=\"--loader=ts-node/esm\" mocha",
     "test:coverage": "NODE_OPTIONS=\"--loader=ts-node/esm\" c8 --reporter=text-summary --reporter=html --reporter=lcov mocha"
   },

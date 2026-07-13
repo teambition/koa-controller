@@ -1,155 +1,409 @@
-@tng/koa-controller
-====
+# @tng/koa-controller
 
-Write koa http server with koa-controller by decorator feature in typescript. Make job easily done in a short time.
+Decorator-based controllers and routing utilities for TypeScript applications built with [Koa](https://koajs.com/). The package includes request-state mapping, AJV validation, request logging, error handling, and OpenTracing middleware.
 
-## Usage Example
+## Installation
 
-```typescript
-// path/to/controller.ts
-import { controller, get } from '@tng/koa-controller'
+```sh
+pnpm add @tng/koa-controller koa koa-bodyparser
+pnpm add -D typescript @types/koa @types/koa-bodyparser @types/koa-router
+```
 
-@controller('/api')
-class UserController {
-  @get('/login')
-  async login() {
-    return 'OK'
+The package targets Node.js 18 or later and uses legacy TypeScript decorators. Enable decorator support in your `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "experimentalDecorators": true,
+    "esModuleInterop": true
   }
 }
+```
 
-// path/to/main/koa/server.ts
-import { getRouterSync } from '@tng/koa-controller'
+## Quick start
+
+Create and export a controller. Controller methods receive `ctx.state` as their first argument and the Koa context as their second argument. Their resolved return value becomes `ctx.body`.
+
+```ts
+// src/controllers/user.ts
+import { controller, get } from '@tng/koa-controller'
+
+@controller('/api/users')
+export class UserController {
+  @get('/:id')
+  async getUser(state, ctx) {
+    return {
+      id: ctx.params.id,
+    }
+  }
+}
+```
+
+Load the exported controllers and mount the router:
+
+```ts
+// src/app.ts
+import Koa from 'koa'
+import bodyParser from 'koa-bodyparser'
+import {
+  errorHandlerMW,
+  getRouterAsync,
+  loggerMW,
+} from '@tng/koa-controller'
+
 const app = new Koa()
 
-// inject all related controller files by given glob pattern
-app.use(getRouterSync({
-  files: path.resolve('path/to/controller/**/*.[jt]s'),
-}).routes())
+app.use(loggerMW({ logger: console }))
+app.use(errorHandlerMW({ logger: console }))
+app.use(bodyParser())
 
+const router = await getRouterAsync({
+  files: 'src/controllers/**/*.[jt]s',
+})
+
+app.use(router.routes())
+app.use(router.allowedMethods())
+
+app.listen(4000)
 ```
+
+Use `getRouterAsync` for ESM controllers. For CommonJS projects whose controller files can be loaded with `require()`, use `getRouterSync`:
+
+```ts
+const Koa = require('koa')
+const { getRouterSync } = require('@tng/koa-controller')
+
+const app = new Koa()
+const router = getRouterSync({
+  files: 'src/controllers/**/*.[jt]s',
+})
+
+app.use(router.routes())
+app.use(router.allowedMethods())
+app.listen(4000)
+```
+
+Controllers must be exported from their modules so that the file loader can discover them.
+
+When running TypeScript source files directly, use a TypeScript runtime/loader that supports decorators and dynamic imports. In a compiled deployment, point `files` at the emitted JavaScript instead, for example `dist/controllers/**/*.js`.
 
 ## Router
 
-### @controller(prefix?: string)
-Register a route on a class for router as a controller.
+### `@controller(prefix?: string)`
 
-`NOTE` The router will ignore the route if no route method is provided in the class.
-And for the contrast, the route method will be ignored unless the controller is registed.
+Marks a class as a controller and optionally gives all of its routes a prefix. A class without decorated route methods is ignored, and a decorated method is ignored unless its class has controller metadata.
 
-### @request(verb: string, route: string)
-Register a route on a method for router.
-It will run other middleware as well when route is matched.
-The sequence is in [middleware squence](#middleware-sequence) section.
-
-Method's first parameter is the state of context, or `ctx.state`; second paramenter is the koa context or `ctx` for the request.
-Method should be a thenable async function which return the result for response body.
-
-`NOTE` A method can be registered for multi routes. all the result and the middlewares will be shared.
-
-example:
 ```ts
-class SomeController {
-  @request('get', '/login')
-  async somePath(state, ctx: Context) {
-    // state is for context.state
-    // ctx is for context
-    return result // equivalent to ctx.body = result
+@controller('/api')
+export class HealthController {
+  @get('/health')
+  async health() {
+    return { status: 'ok' }
   }
 }
 ```
 
-### `@before((ctx: KoaContext) => Promise<void>)`
-### `@after((ctx: KoaContext) => Promise<void>)`
-### `@middleware((ctx: KoaContext, next: Promise<void>) => Promise<void>)`
-Register a before middleware, a after middleware or a middleware for a route which register either on method or controller class.
+A controller class is instantiated once when the router is built. Do not keep request-specific mutable state on the instance because it is shared by concurrent requests.
 
-### middleware sequence
-if same decorator written 2 or more times, router will run in sequence from top to bottom.
-Please see `test/router.test.ts` file to learn more about it.
+### `@request(verb?: string, pathname?: string)`
 
-- controller @middleware | @before
-- method @middleware | @before
-- method function
-- method @after
-- controller @after
+Registers a controller method for an HTTP verb and path. The same method can have more than one route decorator.
 
-### `@get(pathname: string)`
-### `@post(pathname)`
-The shortcut for `@request('get', pathname)` and `@request('post', pathname)`
+```ts
+@controller('/sessions')
+export class SessionController {
+  @request('post', '/')
+  async create(state, ctx) {
+    return { created: true }
+  }
+}
+```
 
-### getRouterSync(options): KoaRouter
-Run `require` to require files and return koa router instance.
+Controller methods must be asynchronous/thenable. Their resolved result is assigned to `ctx.body`.
 
-- options: `<Object>`
-  - files: `<String>` glob pattern to run Nodejs's `require` function. glob will base on `cwd` option.
-  - cwd: `<String>` base working directory to run `require` function. Default is `process.cwd()`.
-  - prefix: `<String>` Koa Router contructor's parameter to generate Koa Router.
-  - logger: `<Logger>` Logger has `debug` or `info` method to debug file or functions.
+### `@get(pathname?: string)` and `@post(pathname?: string)`
 
-## Logger (TODO)
+Shortcuts for `@request('get', pathname)` and `@request('post', pathname)`.
 
-## Tracer
-Use `opentracing` implemented tracer instance to cross-platform tracing.
+## Route middleware
 
-### traceMW(tracer: Tracer, options?): KoaMiddleware
-WIP: Use `opentracing` implemented tracer instance to cross-platform tracing.
+Middleware decorators can be applied to a controller class or an individual method:
 
-## Validate
-### @validate(schema: JSONSchema, { ajv: AjvInstance })
-Generate a `@before` middleware to register on a method or controller by using `AJV`.
+```ts
+@controller('/api')
+@before(async ctx => {
+  ctx.set('x-controller', 'example')
+})
+export class ExampleController {
+  @get('/items')
+  @middleware(async (ctx, next) => {
+    const startedAt = Date.now()
+    await next()
+    ctx.set('x-duration', String(Date.now() - startedAt))
+  })
+  @after(async ctx => {
+    ctx.set('x-handler-complete', 'true')
+  })
+  async list() {
+    return []
+  }
+}
+```
 
-Example
+- `@middleware((ctx, next) => Promise<void>)` registers standard Koa middleware.
+- `@before((ctx) => Promise<void>)` runs before the next middleware.
+- `@after((ctx) => Promise<void>)` runs after downstream middleware completes successfully.
+
+Within the controller and method scopes, `@before` callbacks and the entry phase of `@middleware` run from top to bottom in the order they are declared. The complete execution sequence is:
+
+1. Controller-level `@before` callbacks and `@middleware` entry phases, in declaration order
+2. Method-level `@before` callbacks and `@middleware` entry phases, in declaration order
+3. Controller method
+4. Method-level `@after` callbacks, from top to bottom
+5. Method-level `@middleware` code after `await next()`, in reverse order
+6. Controller-level `@after` callbacks, from top to bottom
+7. Controller-level `@middleware` code after `await next()`, in reverse order
+
+This follows Koa's onion model while preserving top-to-bottom decorator order within each scope.
+
+## Loading controllers
+
+`getRouterAsync(options)` dynamically imports every matching module and works with `ESM` controller files. `getRouterSync(options)` uses `require()` and is intended for CommonJS-loadable(`CJS`) files.
+
+```ts
+const router = await getRouterAsync({
+  cwd: process.cwd(),
+  files: 'src/controllers/**/*.[jt]s',
+  prefix: '/v1',
+})
+```
+
+Options:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `cwd` | `process.cwd()` | Base directory used when resolving the glob and controller files. |
+| `files` | `api/**/*.[jt]s` | Glob pattern used to discover controller modules. |
+| `prefix` | `''` | Prefix passed to the underlying Koa router. |
+| `logger` | `undefined` | Accepted for API compatibility; controller discovery currently uses the `koa:controller` debug namespace. |
+
+For dependency injection or tests, use `loadRouter` to provide constructors directly:
+
+```ts
+const router = loadRouter({
+  prefix: '/v1',
+  controllerConstructors: [UserController],
+})
+```
+
+Set `DEBUG=koa:controller` to inspect controller discovery and route registration.
+
+## Request State
+
+### `@state(map?)`
+
+Without a map, `@state()` replaces `ctx.state` with a shallow merge of `ctx.query`, `ctx.request.body`, and `ctx.params`. Later sources take precedence, so path parameters override body values and body values override query values.
+
+With a map, only the selected values are copied. Every source path is resolved from the Koa context with `lodash.get`:
+
+```ts
+@controller('/users')
+export class UserController {
+  @get('/:id')
+  @state({
+    userId: ['params.id'],
+    name: ['query.name'],
+    token: ['headers.authorization'],
+  })
+  async getUserInfo(state) {
+    return state
+  }
+}
+```
+
+Each mapping value is an array of context paths. When multiple paths are supplied, they are evaluated from left to right and later values overwrite earlier ones.
+
+## Validation
+
+Validation is powered by [AJV](https://ajv.js.org/). The shared default AJV instance enables `coerceTypes` and `useDefaults`, so validation can modify the validated data.
+
+### `@validate(schema, options?)`
+
+Validates the complete Koa context before invoking the controller method. Invalid input throws an HTTP 400 error containing the first AJV validation message.
+
 ```ts
 @validate({
   type: 'object',
-  require: ['query'],
+  required: ['query'],
   properties: {
     query: {
       type: 'object',
-      require: ['id'],
+      required: ['id'],
       properties: {
         id: { type: 'integer' },
-      }
-    }
-  }
+      },
+    },
+  },
 })
-class SomeController { ... }
 ```
 
-### @validateState(schema: JSONSchema, { ajv: AjvInstance })
-Generate a `@before` middleware to register on a method or controller by using `AJV` but ONLY validate `ctx.state`.
-It should be always be used with `@state()`
+### `@validateState(schema, options?)`
 
-## state
-### @state(map: {[key: string]: PathFromContext/String })
-Generate ctx.state from `ctx.query`, `ctx.params` and `ctx.request.body` if map is undefined.
-If map is provided only mapped key-value pair will be included into state.
+Validates only `ctx.state`. Place `@state()` above `@validateState()` when the state should be built from the incoming request first:
 
-The key in map will be the key in state.
-The value in map will be resolved the value in state by finding the value of context in a certain path.
-Value path maybe provided in a array. It means the order to find a value from context.
-
-example
 ```ts
-class UserController {
-  @get('/users/:id')
-  @state({
-    userId: ['params.id'],
-    age: ['query.name'],
-    token: ['header.authorization'],
+@controller('/users')
+export class UserController {
+  @post('/')
+  @state()
+  @validateState({
+    type: 'object',
+    required: ['name'],
+    properties: {
+      name: { type: 'string', minLength: 1 },
+      age: { type: 'integer', minimum: 0 },
+    },
   })
-  async getUserInfo(state) {
-    // GET /users/123?name=John&age=18
-    state = {
-      userId, // 123 (string)
-      name, // John
-      // age will not be in the state
-      token, // token is undefined unless it passed.
-    }
+  async create(state) {
+    return state
   }
 }
 ```
 
-## Error Handler (TODO)
+Both decorators accept a custom AJV instance:
 
-## Contribution (WIP)
+```ts
+@validateState(schema, { ajv })
+```
+
+### Type-safe validated state
+
+AJV performs runtime validation; it does not automatically infer the controller method parameter type. Define the state type explicitly and use AJV's `JSONSchemaType<T>` to keep the schema consistent with that type. `JSONSchemaType<T>` requires `strictNullChecks` to be enabled in TypeScript.
+
+```ts
+import type { JSONSchemaType } from 'ajv'
+import {
+  controller,
+  get,
+  state,
+  validateState,
+} from '@tng/koa-controller'
+
+interface GetUserState {
+  userId: string
+}
+
+const getUserStateSchema: JSONSchemaType<GetUserState> = {
+  type: 'object',
+  required: ['userId'],
+  properties: {
+    userId: { type: 'string' },
+  },
+  additionalProperties: false,
+}
+
+@controller('/users')
+export class UserController {
+  @get('/:id')
+  @state({
+    userId: ['params.id'],
+  })
+  @validateState(getUserStateSchema)
+  async getUser(state: GetUserState) {
+    const { userId } = state
+
+    return { userId }
+  }
+}
+```
+
+In this pattern, `@state` builds the value, `@validateState` verifies it at runtime, and `GetUserState` provides autocomplete and compile-time checks inside the controller method.
+
+## Request logging
+
+### `loggerMW(options?)`
+
+Logs one structured object after every request. The object contains `status`, `method`, `routerName`, `duration`, `url`, and `userAgent`.
+
+```ts
+app.use(loggerMW({
+  logger,
+  inject: async (data, ctx) => ({
+    ...data,
+    traceId: ctx.traceId,
+  }),
+}))
+```
+
+Set `ctx.skipLogger = true` to suppress the request log. If `inject` throws, the middleware ignores that error and logs the base request data.
+
+## Error handling
+
+### `errorHandlerMW(options?)`
+
+Catches downstream errors and responds with:
+
+```json
+{
+  "error": "error message"
+}
+```
+
+The middleware uses `error.status` when present and defaults to HTTP 500. Errors with status 500 or greater are sent to the optional logger.
+
+```ts
+app.use(errorHandlerMW({ logger }))
+```
+
+Register `loggerMW` before `errorHandlerMW` if the request logger should observe the final error status.
+
+## Tracing and async context
+
+### `traceMW(tracer, options?)`
+
+Creates an OpenTracing span for every HTTP request, extracts an upstream span context from the request headers, and records the HTTP method, URL, and response status.
+
+```ts
+app.use(traceMW(tracer))
+```
+
+Pass `zipkinHeaderEnable: true` to fall back to Zipkin header extraction when the standard HTTP header format has no parent trace.
+
+### `alsMW(als)`
+
+Creates an isolated `AsyncLocalStorage` store for every request. Register it before `traceMW` to make the current span and trace ID available from the store:
+
+```ts
+import { AsyncLocalStorage } from 'node:async_hooks'
+import type { Span } from 'opentracing'
+import { alsMW, traceMW } from '@tng/koa-controller'
+
+interface RequestStore {
+  span?: Span
+  traceId?: string
+}
+
+const als = new AsyncLocalStorage<RequestStore>()
+
+app.use(alsMW(als))
+app.use(traceMW(tracer, { als }))
+```
+
+## Development
+
+```sh
+pnpm install
+pnpm lint
+pnpm test
+pnpm test:coverage
+pnpm build
+```
+
+The build produces both ESM (`lib/*.js`) and CommonJS (`lib/*.cjs`) entry points, plus TypeScript declarations.
+
+## License
+
+MIT

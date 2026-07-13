@@ -15,6 +15,13 @@ interface Context extends KoaContext {
 }
 interface Middleware extends KoaMiddleware<DefaultState, Context> { }
 
+/**
+ * A function used by {@link before} and {@link after}.
+ *
+ * The function receives the current Koa context and must return a promise.
+ * It does not receive Koa's `next` callback; use {@link middleware} when the
+ * middleware needs to wrap downstream execution.
+ */
 export interface MiddlewareFn {
   (ctx: Context): Promise<void>
 }
@@ -53,6 +60,32 @@ class MethodMeta {
   responseStream?: boolean = false
 }
 
+/**
+ * Marks a class as a controller and registers a prefix for all routes declared
+ * on that class.
+ *
+ * A controller may declare more than one prefix by applying the decorator more
+ * than once. Controller classes loaded through {@link getRouterAsync} or
+ * {@link getRouterSync} must be exported from their modules.
+ *
+ * Controller instances are created once when the router is built, so
+ * request-specific mutable data should be stored on `ctx` rather than on the
+ * controller instance.
+ *
+ * @param prefix Route prefix applied before each method pathname.
+ * @returns A class decorator.
+ *
+ * @example
+ * ```ts
+ * @controller('/api/users')
+ * export class UserController {
+ *   @get('/:id')
+ *   async getUser(state, ctx) {
+ *     return { id: ctx.params.id }
+ *   }
+ * }
+ * ```
+ */
 export function controller(prefix = '/') {
   assert.ok(prefix)
   return (constructor: ControllerConstructor) => {
@@ -67,6 +100,30 @@ export function controller(prefix = '/') {
   }
 }
 
+/**
+ * Registers standard Koa middleware on a controller class or one of its route
+ * methods.
+ *
+ * The middleware must return a promise and may run code both before and after
+ * `await next()`, following Koa's onion model. Class-level middleware runs
+ * before method-level middleware.
+ *
+ * @param middleware An async Koa middleware function.
+ * @returns A class or method decorator.
+ *
+ * @example
+ * ```ts
+ * @get('/items')
+ * @middleware(async (ctx, next) => {
+ *   const startedAt = Date.now()
+ *   await next()
+ *   ctx.set('x-duration', String(Date.now() - startedAt))
+ * })
+ * async listItems() {
+ *   return []
+ * }
+ * ```
+ */
 export function middleware(middleware: Middleware) {
   const middlewareName = middleware.name || 'middleware'
   return internalMiddleware(({controllerName, propertyName}) => async (ctx, next) => {
@@ -129,6 +186,28 @@ function internalMiddleware(mwMaker: MiddlewareMaker, { pushToBottom = false } =
   }
 }
   
+/**
+ * Registers a function that runs before the next controller middleware or
+ * route method.
+ *
+ * Use this decorator for one-way setup such as authentication checks, request
+ * normalization, or populating `ctx.state`. Use {@link middleware} instead
+ * when code must also run after the route method.
+ *
+ * @param beforeFunc Async function invoked with the current Koa context.
+ * @returns A class or method decorator.
+ *
+ * @example
+ * ```ts
+ * @before(async ctx => {
+ *   if (!ctx.get('authorization')) ctx.throw(401)
+ * })
+ * @get('/profile')
+ * async profile(state) {
+ *   return state.user
+ * }
+ * ```
+ */
 export function before(beforeFunc: MiddlewareFn) {
   const beforeName = beforeFunc.name || 'before'
   const mwMaker: MiddlewareMaker = ({ controllerName, propertyName }) => async (ctx, next) => {
@@ -146,6 +225,28 @@ export function before(beforeFunc: MiddlewareFn) {
   return internalMiddleware(mwMaker)
 }
   
+/**
+ * Registers a function that runs after the route and downstream middleware
+ * complete successfully.
+ *
+ * The callback is not invoked when downstream middleware throws. Decorate the
+ * controller class to apply the callback to every route, or decorate a method
+ * to apply it only to that route method.
+ *
+ * @param afterFunc Async function invoked with the current Koa context.
+ * @returns A class or method decorator.
+ *
+ * @example
+ * ```ts
+ * @get('/items')
+ * @after(async ctx => {
+ *   ctx.set('x-handler-complete', 'true')
+ * })
+ * async listItems() {
+ *   return []
+ * }
+ * ```
+ */
 export function after(afterFunc: MiddlewareFn) {
   const afterName = afterFunc.name || 'after'
   const mwMaker: MiddlewareMaker = ({ controllerName, propertyName }) => async (ctx, next) => {
@@ -163,6 +264,28 @@ export function after(afterFunc: MiddlewareFn) {
   return internalMiddleware(mwMaker, { pushToBottom: true })
 }
 
+/**
+ * Registers a controller method for an HTTP verb and pathname.
+ *
+ * The decorated method is called with `ctx.state` as its first argument and
+ * the Koa context as its second argument. It must return a promise; the
+ * resolved value is assigned to `ctx.body`. The same method may be registered
+ * for multiple routes by applying this decorator more than once.
+ *
+ * @param verb HTTP method understood by `koa-router`, such as `get`, `post`,
+ * `put`, `patch`, or `delete`.
+ * @param pathname Route pathname relative to the controller prefix.
+ * @returns A method decorator.
+ *
+ * @example
+ * ```ts
+ * @request('delete', '/:id')
+ * async deleteUser(state, ctx) {
+ *   await userService.remove(ctx.params.id)
+ *   ctx.status = 204
+ * }
+ * ```
+ */
 export function request(verb = 'get', pathname = '/') {
   assert.ok(verb)
   assert.ok(pathname)
@@ -185,14 +308,73 @@ export function request(verb = 'get', pathname = '/') {
   }
 }
 
+/**
+ * Registers a controller method as an HTTP GET route.
+ *
+ * This is equivalent to `@request('get', pathname)`.
+ *
+ * @param path Route pathname relative to the controller prefix.
+ * @returns A method decorator.
+ *
+ * @example
+ * ```ts
+ * @get('/:id')
+ * async getUser(state, ctx) {
+ *   return userService.find(ctx.params.id)
+ * }
+ * ```
+ */
 export function get(path = '/') {
   return request('get', path)
 }
 
+/**
+ * Registers a controller method as an HTTP POST route.
+ *
+ * This is equivalent to `@request('post', pathname)`.
+ *
+ * @param path Route pathname relative to the controller prefix.
+ * @returns A method decorator.
+ *
+ * @example
+ * ```ts
+ * @post('/')
+ * async createUser(state) {
+ *   return userService.create(state)
+ * }
+ * ```
+ */
 export function post(path = '/') {
   return request('post', path)
 }
 
+/**
+ * Builds a Koa router from an explicit list of decorated controller classes.
+ *
+ * Use this function when controller constructors are already available, for
+ * example with dependency injection or in tests. Each controller is
+ * instantiated once while the router is built. Constructors without
+ * controller/route metadata are ignored.
+ *
+ * @param options Router construction options.
+ * @param options.controllerConstructors Decorated controller classes to
+ * register.
+ * @param options.prefix Optional prefix applied to every registered route.
+ * @param options.logger Optional logger reserved for router loading.
+ * @returns A configured `koa-router` instance. Mount both `routes()` and
+ * `allowedMethods()` on the Koa application.
+ *
+ * @example
+ * ```ts
+ * const router = loadRouter({
+ *   prefix: '/v1',
+ *   controllerConstructors: [UserController],
+ * })
+ *
+ * app.use(router.routes())
+ * app.use(router.allowedMethods())
+ * ```
+ */
 export function loadRouter({
   prefix = '',
   logger: _logger,
@@ -241,6 +423,35 @@ export function loadRouter({
   return router
 }
 
+/**
+ * Discovers controller modules with a glob, loads them with `require()`, and
+ * builds a Koa router.
+ *
+ * Use this synchronous loader only when every matched controller module can be
+ * loaded by CommonJS `require()`. Each controller class must be exported from
+ * its module. Use {@link getRouterAsync} for ESM controller modules.
+ *
+ * @param options Controller discovery and router options.
+ * @param options.cwd Base directory used to resolve `files`. Defaults to
+ * `process.cwd()`.
+ * @param options.files Glob pattern for controller modules. By default it
+ * recursively matches JavaScript and TypeScript files below `api`.
+ * @param options.prefix Optional prefix applied to every registered route.
+ * @param options.logger Optional logger forwarded to {@link loadRouter}.
+ * @returns A configured `koa-router` instance.
+ *
+ * @example
+ * ```ts
+ * const router = getRouterSync({
+ *   cwd: process.cwd(),
+ *   files: 'src/controllers/*.[jt]s',
+ *   prefix: '/v1',
+ * })
+ *
+ * app.use(router.routes())
+ * app.use(router.allowedMethods())
+ * ```
+ */
 export function getRouterSync({
   cwd = process.cwd(),
   files = 'api/**/*.[jt]s',
@@ -265,8 +476,33 @@ export function getRouterSync({
 }
 
 /**
- * Async version of getRouterSync. Uses dynamic import() to load controller files,
- * works in both CJS and ESM projects. Controller files can use either module syntax.
+ * Discovers controller modules with a glob, loads them with dynamic `import()`,
+ * and builds a Koa router.
+ *
+ * This is the recommended loader for ESM projects. Every controller class must
+ * be exported from its module. Files are imported sequentially in glob result
+ * order before their exported classes are passed to {@link loadRouter}.
+ *
+ * @param options Controller discovery and router options.
+ * @param options.cwd Base directory used to resolve `files`. Defaults to
+ * `process.cwd()`.
+ * @param options.files Glob pattern for controller modules. By default it
+ * recursively matches JavaScript and TypeScript files below `api`.
+ * @param options.prefix Optional prefix applied to every registered route.
+ * @param options.logger Optional logger forwarded to {@link loadRouter}.
+ * @returns A promise resolving to a configured `koa-router` instance.
+ *
+ * @example
+ * ```ts
+ * const router = await getRouterAsync({
+ *   cwd: process.cwd(),
+ *   files: 'src/controllers/*.[jt]s',
+ *   prefix: '/v1',
+ * })
+ *
+ * app.use(router.routes())
+ * app.use(router.allowedMethods())
+ * ```
  */
 export async function getRouterAsync({
   cwd = process.cwd(),
