@@ -6,11 +6,11 @@ import { Tracer, FORMAT_HTTP_HEADERS, Tags, Span } from 'opentracing'
 interface Context extends KoaContext {
   tracer: Tracer
   span?: Span
+  traceId?: string
   routePath?: string
-  // TODO: Declare `traceId?: string` so the context type matches traceMW's runtime behavior.
 }
 
-interface Middleware extends KoaMiddleware<DefaultState, Context> { }
+type Middleware = KoaMiddleware<DefaultState, Context>
 
 /**
  * Creates Koa middleware that starts a fresh AsyncLocalStorage context for
@@ -92,13 +92,14 @@ export function traceMW<T extends { span?: Span, traceId?: string }>(tracer: Tra
     }
 
     const span = ctx.span = tracer.startSpan('http-request', {
-      childOf: parentSpanContext,
+      childOf: parentSpanContext ?? undefined,
     })
     const traceId = ctx.traceId = span?.context().toTraceId() || randomUUID()
 
-    if (als?.getStore()) {
-      als.getStore().span = span
-      als.getStore().traceId = traceId
+    const store = als?.getStore()
+    if (store) {
+      store.span = span
+      store.traceId = traceId
     } 
 
     return next().finally(() => {
