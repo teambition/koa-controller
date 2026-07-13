@@ -23,5 +23,5 @@ jobs:
         with:
           release-type: node
           skip-github-release: true
-          release-as: ${{ github.event.inputs.version }}
+          release-as: ${{ github.event.inputs.version || '' }}
 
