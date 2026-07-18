@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.1-alpha.3](https://github.com/teambition/koa-controller/compare/v2.0.0-alpha.3...v2.0.1-alpha.3) (2026-07-18)
+
+
+### Bug Fixes
+
+* expand releasable commit types ([8ab14fb](https://github.com/teambition/koa-controller/commit/8ab14fb63bccf3430555a395c57fbebf30745d4a))
+
+
+### Miscellaneous Chores
+
+* empty commit ([fe7d6f0](https://github.com/teambition/koa-controller/commit/fe7d6f01d70ba2cc5562839f8e3d85f3177e8817))
+
 ## 2.0.0-alpha.3 (2026-07-18)
 
 
