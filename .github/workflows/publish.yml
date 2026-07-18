@@ -1,11 +1,17 @@
-name: Publish to npm
+name: Publish Release
 
 on:
   push:
     branches: [main]
 
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  pull-requests: write
+  issues: write
   id-token: write
 
 jobs:
@@ -24,41 +30,66 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Check if new version
-        id: check
+      - name: Check whether this push merged a pending Release PR
+        id: publish-check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-            echo "Tag v$VERSION already exists, skipping."
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "New version detected: v$VERSION"
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          release_pr=$(
+            gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state merged \
+              --base main \
+              --label "autorelease: pending" \
+              --limit 20 \
+              --json number,mergeCommit \
+              | jq -r --arg sha "$GITHUB_SHA" \
+                '.[] | select(.mergeCommit.oid == $sha) | .number' \
+              | head -n 1
+          )
+
+          if [ -z "$release_pr" ]; then
+            echo "This push did not merge a pending Release PR; skipping."
+            echo "should-publish=false" >> "$GITHUB_OUTPUT"
+            echo "should-finalize=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
+          version=$(node -p "require('./package.json').version")
+          if npm view "@tng/koa-controller@$version" version >/dev/null 2>&1; then
+            echo "@tng/koa-controller@$version is already published."
+            echo "should-publish=false" >> "$GITHUB_OUTPUT"
+            echo "should-finalize=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Release PR #$release_pr will publish @tng/koa-controller@$version."
+          echo "should-publish=true" >> "$GITHUB_OUTPUT"
+          echo "should-finalize=true" >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies
-        if: steps.check.outputs.should_publish == 'true'
+        if: steps.publish-check.outputs.should-publish == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build package
-        if: steps.check.outputs.should_publish == 'true'
+        if: steps.publish-check.outputs.should-publish == 'true'
         run: pnpm build
 
       - name: Verify package contents
-        if: steps.check.outputs.should_publish == 'true'
+        if: steps.publish-check.outputs.should-publish == 'true'
         run: npm pack --dry-run
 
       - name: Publish to npm
-        if: steps.check.outputs.should_publish == 'true'
-        run: pnpm publish --access public --no-git-checks --tag latest --dry-run
+        if: steps.publish-check.outputs.should-publish == 'true'
+        run: pnpm publish --access public --no-git-checks --tag latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Create and push git tag
-        if: steps.check.outputs.should_publish == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ steps.check.outputs.version }}" -m "Release v${{ steps.check.outputs.version }}"
-          git push origin "v${{ steps.check.outputs.version }}"
+      - name: Tag the release and create GitHub Release
+        if: success() && steps.publish-check.outputs.should-finalize == 'true'
+        uses: googleapis/release-please-action@v4
+        with:
+          release-type: node
+          target-branch: main
+          skip-github-pull-request: true

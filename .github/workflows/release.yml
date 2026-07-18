@@ -8,6 +8,9 @@ on:
         required: false
         default: ''
         type: string
+concurrency:
+  group: create-release-pr
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -15,13 +18,22 @@ permissions:
   issues: write
 
 jobs:
-  release-please:
+  create-release-pr:
     runs-on: ubuntu-latest
     steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
+      - name: Create an automatically versioned release PR
+        if: inputs.version == ''
+        uses: googleapis/release-please-action@v4
         with:
           release-type: node
+          target-branch: main
           skip-github-release: true
-          release-as: ${{ github.event.inputs.version || '' }}
 
+      - name: Create a release PR for the requested version
+        if: inputs.version != ''
+        uses: googleapis/release-please-action@v4
+        with:
+          release-type: node
+          target-branch: main
+          skip-github-release: true
+          release-as: ${{ inputs.version }}
