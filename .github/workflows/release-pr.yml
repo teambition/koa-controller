@@ -21,6 +21,7 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
   create-release-pr:
@@ -88,6 +89,8 @@ jobs:
             This PR release v${{ steps.bumped-version.outputs.version }}.
 
             Version source: ${{ steps.version.outputs.version-source }}.
+          labels: |
+            autorelease: pending
           add-paths: |
             package.json
             CHANGELOG.md

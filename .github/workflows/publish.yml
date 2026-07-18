@@ -1,12 +1,11 @@
 name: Publish Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  pull_request:
+    types: [closed]
 
 concurrency:
-  group: publish-release-${{ github.ref }}
+  group: publish-release-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 permissions:
@@ -15,10 +14,15 @@ permissions:
 
 jobs:
   publish:
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/version-') &&
+      contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -30,13 +34,14 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: pnpm
 
-      - name: Verify tag matches package version
+      - name: Verify release PR version
         run: |
           version=$(node -p "require('./package.json').version")
-          tag="${GITHUB_REF_NAME#v}"
+          release_branch="${{ github.event.pull_request.head.ref }}"
+          release_version="${release_branch#release/version-}"
 
-          if [ "$version" != "$tag" ]; then
-            echo "Tag v$tag does not match package.json version $version."
+          if [ "$version" != "$release_version" ]; then
+            echo "Release PR branch $release_branch does not match package.json version $version."
             exit 1
           fi
 
@@ -68,7 +73,7 @@ jobs:
         if: steps.publish-check.outputs.should-publish == 'true'
         run: npm publish --access public --tag latest
 
-      - name: Create GitHub Release
+      - name: Create tag and GitHub Release
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,6 +81,13 @@ jobs:
           version=$(node -p "require('./package.json').version")
           tag="v$version"
           notes_file="$RUNNER_TEMP/release-notes.md"
+
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists."
+          else
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "$tag"
+          fi
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $tag already exists."
@@ -85,5 +97,6 @@ jobs:
           node .github/scripts/extract-release-notes.mjs "$version" "$notes_file"
           gh release create "$tag" \
             --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
             --title "$tag" \
             --notes-file "$notes_file"
