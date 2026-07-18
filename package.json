@@ -19,6 +19,7 @@
     "build": "node scripts/build.mjs",
     "lint": "eslint src",
     "prepack": "npm run build",
+    "release:changelog": "conventional-changelog -p angular -i CHANGELOG.md -s",
     "test": "mocha",
     "test:coverage": "c8 --reporter=text-summary --reporter=html --reporter=lcov mocha"
   },
@@ -41,6 +42,9 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.1.1",
     "c8": "^11.0.0",
+    "conventional-changelog": "^8.1.0",
+    "conventional-changelog-angular": "^9.2.1",
+    "conventional-recommended-bump": "^12.1.0",
     "eslint": "^10.7.0",
     "koa": "^3.2.1",
     "koa-bodyparser": "^4.4.1",

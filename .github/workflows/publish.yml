@@ -1,8 +1,13 @@
-name: Publish to npm
+name: Publish Release
 
 on:
   push:
-    branches: [main]
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: publish-release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -23,42 +28,62 @@ jobs:
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
+          cache: pnpm
 
-      - name: Check if new version
-        id: check
+      - name: Verify tag matches package version
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-            echo "Tag v$VERSION already exists, skipping."
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "New version detected: v$VERSION"
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          version=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+
+          if [ "$version" != "$tag" ]; then
+            echo "Tag v$tag does not match package.json version $version."
+            exit 1
           fi
 
+      - name: Check whether this version is already published
+        id: publish-check
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "@tng/koa-controller@$version" version >/dev/null 2>&1; then
+            echo "@tng/koa-controller@$version is already published."
+            echo "should-publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "should-publish=true" >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies
-        if: steps.check.outputs.should_publish == 'true'
+        if: steps.publish-check.outputs.should-publish == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build package
-        if: steps.check.outputs.should_publish == 'true'
+        if: steps.publish-check.outputs.should-publish == 'true'
         run: pnpm build
 
       - name: Verify package contents
-        if: steps.check.outputs.should_publish == 'true'
+        if: steps.publish-check.outputs.should-publish == 'true'
         run: npm pack --dry-run
 
       - name: Publish to npm
-        if: steps.check.outputs.should_publish == 'true'
-        run: pnpm publish --access public --no-git-checks --dry-run
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        if: steps.publish-check.outputs.should-publish == 'true'
+        run: npm publish --access public --tag latest
 
-      - name: Create and push git tag
-        if: steps.check.outputs.should_publish == 'true'
+      - name: Create GitHub Release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ steps.check.outputs.version }}" -m "Release v${{ steps.check.outputs.version }}"
-          git push origin "v${{ steps.check.outputs.version }}"
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists."
+            exit 0
+          fi
+
+          node .github/scripts/extract-release-notes.mjs "$version" "$notes_file"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$tag" \
+            --notes-file "$notes_file"

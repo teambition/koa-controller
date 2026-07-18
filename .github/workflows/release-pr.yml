@@ -1,0 +1,93 @@
+name: Create Release PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Exact version to release, for example 2.0.0. Leave empty to calculate from commits.'
+        required: false
+        default: ''
+        type: string
+      target:
+        description: 'Target branch for the release PR.'
+        required: false
+        default: main
+        type: string
+
+concurrency:
+  group: create-release-pr-${{ inputs.target }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-release-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve version bump
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            version="${INPUT_VERSION#v}"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "version-source=manual input" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          version=$(npx --no-install conventional-recommended-bump -p angular)
+          if [ -z "$version" ]; then
+            version=patch
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version-source=conventional-recommended-bump" >> "$GITHUB_OUTPUT"
+
+      - name: Bump package version
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+
+      - name: Read bumped version
+        id: bumped-version
+        run: |
+          version=$(npm pkg get version | tr -d '"')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Update changelog
+        run: pnpm release:changelog
+
+      - name: Create or update release PR
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: release/version-${{ steps.bumped-version.outputs.version }}
+          base: ${{ inputs.target }}
+          delete-branch: true
+          commit-message: |
+            chore(release): v${{ steps.bumped-version.outputs.version }}
+          title: |
+            chore(release): v${{ steps.bumped-version.outputs.version }}
+          body: |
+            This PR release v${{ steps.bumped-version.outputs.version }}.
+
+            Version source: ${{ steps.version.outputs.version-source }}.
+          add-paths: |
+            package.json
+            CHANGELOG.md
