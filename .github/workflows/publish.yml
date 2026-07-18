@@ -82,9 +82,7 @@ jobs:
 
       - name: Publish to npm
         if: steps.publish-check.outputs.should-publish == 'true'
-        run: pnpm publish --access public --no-git-checks --tag latest
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --tag latest
 
       - name: Tag the release and create GitHub Release
         if: success() && steps.publish-check.outputs.should-finalize == 'true'
