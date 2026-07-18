@@ -25,7 +25,8 @@ jobs:
         if: inputs.version == ''
         uses: googleapis/release-please-action@v4
         with:
-          release-type: node
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
           target-branch: main
           skip-github-release: true
 
@@ -33,7 +34,8 @@ jobs:
         if: inputs.version != ''
         uses: googleapis/release-please-action@v4
         with:
-          release-type: node
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
           target-branch: main
           skip-github-release: true
           release-as: ${{ inputs.version }}

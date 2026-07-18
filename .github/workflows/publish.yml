@@ -88,6 +88,7 @@ jobs:
         if: success() && steps.publish-check.outputs.should-finalize == 'true'
         uses: googleapis/release-please-action@v4
         with:
-          release-type: node
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
           target-branch: main
           skip-github-pull-request: true
