@@ -30,6 +30,15 @@ export class Route {
   }
 }
 
+/**
+ * Metadata of one controller method.
+ *
+ * Metadata is stored under a global symbol, so it may have been written by
+ * another installed copy of this package, including older versions whose
+ * method metadata only has `routes` and `middlewares`. Fields added since then
+ * must be treated as possibly missing when reading metadata that has not been
+ * through {@link ensureMethodMeta} or {@link resolveControllerMeta}.
+ */
 export class MethodMeta {
   routes: Route[] = []
   middlewares: Middleware[] = []
@@ -73,6 +82,8 @@ export function ensureMethodMeta(constructor: ControllerConstructor, propertyNam
     methodMeta = new MethodMeta()
     methodMetaMap.set(propertyName, methodMeta)
   }
+  // Created by an older copy of this package, which had no `stateSchemas`.
+  if (!Array.isArray(methodMeta.stateSchemas)) methodMeta.stateSchemas = []
   return methodMeta
 }
 
@@ -109,7 +120,8 @@ export function resolveControllerMeta(constructor: ControllerConstructor): Contr
       }
       resolvedMethodMeta.routes.push(...methodMeta.routes)
       resolvedMethodMeta.middlewares.push(...methodMeta.middlewares)
-      resolvedMethodMeta.stateSchemas.push(...methodMeta.stateSchemas)
+      // Absent on metadata written by an older copy of this package.
+      resolvedMethodMeta.stateSchemas.push(...(methodMeta.stateSchemas ?? []))
       if (methodMeta.input) resolvedMethodMeta.input = methodMeta.input
       if (methodMeta.doc) resolvedMethodMeta.doc = { ...resolvedMethodMeta.doc, ...methodMeta.doc }
     })
