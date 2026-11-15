@@ -3,16 +3,12 @@ import { pathToFileURL } from 'node:url'
 import { globSync } from 'glob'
 import Debug from 'debug'
 import KoaRouter from 'koa-router'
-import type { Context as KoaContext, DefaultState, Middleware as KoaMiddleware } from 'koa'
-import type { Span } from 'opentracing'
 import type { Logger } from './logger.js'
 import { strict as assert } from'assert'
 import { createRequire } from 'node:module'
+import { ensureControllerMeta, ensureMethodMeta, joinRoutePath, resolveControllerMeta, Route } from './metadata.js'
+import type { Context, ControllerConstructor, Middleware } from './metadata.js'
 
-interface Context extends KoaContext {
-  span?: Span
-}
-type Middleware = KoaMiddleware<DefaultState, Context>
 
 /**
  * A function used by {@link before} and {@link after}.
@@ -28,88 +24,6 @@ export interface MiddlewareFn {
 type MiddlewareMaker = (options: {controllerName: string, propertyName?: string}) => Middleware
 
 const debug = Debug('koa:controller')
-// Registered globally so that every loaded copy of this package (ESM and CJS
-// builds, or duplicated installs) recognizes the same controller metadata.
-const controllerSymbol = Symbol.for('@tng/koa-controller:controller')
-
-type Controller = object
-
-interface ControllerConstructor {
-  new (): Controller
-  [controllerSymbol]?: ControllerMeta
-}
-
-class ControllerMeta {
-  prefixs: string[] = []
-  middlewares: Middleware[] = []
-  methodMetaMap: Map<string, MethodMeta> = new Map()
-}
-
-function getOwnControllerMeta(constructor: ControllerConstructor): ControllerMeta | undefined {
-  // Static members are inherited through the prototype chain, so a plain
-  // property read on a subclass would return the parent's metadata.
-  return Object.prototype.hasOwnProperty.call(constructor, controllerSymbol)
-    ? constructor[controllerSymbol]
-    : undefined
-}
-
-function ensureControllerMeta(constructor: ControllerConstructor): ControllerMeta {
-  let meta = getOwnControllerMeta(constructor)
-  if (!meta) {
-    meta = new ControllerMeta()
-    constructor[controllerSymbol] = meta
-  }
-  return meta
-}
-
-/**
- * Merges the metadata declared on a controller class with the metadata
- * declared on its parent classes.
- *
- * Routes and middlewares are inherited, with parent middlewares placed before
- * the subclass's own so that they wrap them. Prefixes are not inherited: a
- * class is only registered under the prefixes it declares itself.
- */
-function resolveControllerMeta(constructor: ControllerConstructor): ControllerMeta | undefined {
-  const ownMeta = getOwnControllerMeta(constructor)
-  if (!ownMeta) return undefined
-
-  const chain: ControllerMeta[] = []
-  for (let current = constructor; typeof current === 'function'; current = Object.getPrototypeOf(current)) {
-    const meta = getOwnControllerMeta(current)
-    if (meta) chain.unshift(meta)
-  }
-
-  const resolved = new ControllerMeta()
-  resolved.prefixs = [...ownMeta.prefixs]
-  for (const meta of chain) {
-    resolved.middlewares.push(...meta.middlewares)
-    meta.methodMetaMap.forEach((methodMeta, propertyName) => {
-      let resolvedMethodMeta = resolved.methodMetaMap.get(propertyName)
-      if (!resolvedMethodMeta) {
-        resolvedMethodMeta = new MethodMeta()
-        resolved.methodMetaMap.set(propertyName, resolvedMethodMeta)
-      }
-      resolvedMethodMeta.routes.push(...methodMeta.routes)
-      resolvedMethodMeta.middlewares.push(...methodMeta.middlewares)
-    })
-  }
-  return resolved
-}
-
-class Route {
-  verb: string
-  pathname: string
-  constructor({ verb, pathname }: { verb: string, pathname: string }) {
-    this.verb = verb
-    this.pathname = pathname
-  }
-}
-class MethodMeta {
-  routes: Route[] = []
-  middlewares: Middleware[] = []
-}
-
 /**
  * Marks a class as a controller and registers a prefix for all routes declared
  * on that class.
@@ -213,13 +127,7 @@ function internalMiddleware(mwMaker: MiddlewareMaker, { pushToBottom = false } =
 
       const mw = mwMaker({ controllerName, propertyName })
 
-      const controllerConstructor: ControllerConstructor = target.constructor
-      const methodMetaMap = ensureControllerMeta(controllerConstructor).methodMetaMap
-      if (!methodMetaMap.has(propertyName)) {
-        methodMetaMap.set(propertyName, new MethodMeta())
-      }
-      const methodMeta = methodMetaMap.get(propertyName)
-      assert.ok(methodMeta)
+      const methodMeta = ensureMethodMeta(constructor, propertyName)
 
       if (pushToBottom) {
         methodMeta.middlewares.push(mw)
@@ -337,12 +245,7 @@ export function request(verb = 'get', pathname = '/') {
   return (target: any, propertyName: string, _descriptor?: PropertyDescriptor) => {
     const controllerConstructor: ControllerConstructor = target.constructor
     debug(`@request ${controllerConstructor.name}/${propertyName} ${verb} ${pathname}`)
-    const methodMetaMap = ensureControllerMeta(controllerConstructor).methodMetaMap
-    if (!methodMetaMap.has(propertyName)) {
-      methodMetaMap.set(propertyName, new MethodMeta())
-    }
-    const methodMeta = methodMetaMap.get(propertyName)
-    assert.ok(methodMeta)
+    const methodMeta = ensureMethodMeta(controllerConstructor, propertyName)
 
     methodMeta.routes.push(new Route({
       verb,
@@ -463,7 +366,7 @@ export function loadRouter({
 
       for (const prefix of controllerMeta.prefixs) {
         for (const { verb, pathname } of methodMeta.routes) {
-          const route = (path.posix.join(prefix, pathname)).replace(/\/+$/, '') || '/'
+          const route = joinRoutePath(prefix, pathname)
           debug(`register ${verb} ${route} ${routerName} (${controllerMiddlewares.length + methodMiddlewares.length} mw)`)
           router.register(route, [verb], [...controllerMiddlewares, ...methodMiddlewares, mainMW], { name: routerName })
         }
@@ -514,15 +417,7 @@ export function getRouterSync({
   prefix?: string
   logger?: Logger
 } = {}) {
-  const controllerConstructors: ControllerConstructor[] = []
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore TS1343 — import.meta only in ESM, stripped for CJS build
-  const metaUrl: string = import.meta?.url ?? ''
-  const localRequire: NodeRequire = metaUrl ? createRequire(metaUrl) as NodeRequire : require as NodeRequire
-  findControllerFiles(files, cwd).forEach(file => {
-    debug(`getRouterSync: load file ${file} ...`)
-    collectExports(localRequire(path.resolve(cwd, file)), controllerConstructors)
-  })
+  const controllerConstructors = loadControllersSync({ cwd, files })
   return loadRouter({ prefix, controllerConstructors, logger })
 }
 
@@ -567,15 +462,73 @@ export async function getRouterAsync({
   prefix?: string
   logger?: Logger
 } = {}): Promise<KoaRouter> {
-  const controllerConstructors: ControllerConstructor[] = []
-  const matchedFiles = findControllerFiles(files, cwd)
-  for (const file of matchedFiles) {
-    debug(`loadControllers: load file ${file} ...`)
-    const fileUrl = pathToFileURL(path.resolve(cwd, file)).href
-    const exportObject = await import(fileUrl)
-    collectExports(exportObject, controllerConstructors)
-  }
+  const controllerConstructors = await loadControllersAsync({ cwd, files })
   return loadRouter({ prefix, controllerConstructors, logger })
+}
+
+/**
+ * Discovers controller modules with a glob, loads them with `require()`, and
+ * returns the classes and functions they export.
+ *
+ * Use it when the controller classes are needed for something other than a
+ * router, such as {@link generateOpenAPI}. Files are loaded in ascending order
+ * of their paths. Use {@link loadControllersAsync} for ESM controller modules.
+ *
+ * @param options Controller discovery options.
+ * @param options.cwd Base directory used to resolve `files`. Defaults to
+ * `process.cwd()`.
+ * @param options.files Glob pattern for controller modules. By default it
+ * recursively matches JavaScript and TypeScript files below `api`.
+ * @returns The exported constructors, in load order.
+ */
+export function loadControllersSync({
+  cwd = process.cwd(),
+  files = 'api/**/*.[jt]s',
+}: {
+  cwd?: string
+  files?: string
+} = {}): ControllerConstructor[] {
+  const controllerConstructors: ControllerConstructor[] = []
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore TS1343 — import.meta only in ESM, stripped for CJS build
+  const metaUrl: string = import.meta?.url ?? ''
+  const localRequire: NodeRequire = metaUrl ? createRequire(metaUrl) as NodeRequire : require as NodeRequire
+  findControllerFiles(files, cwd).forEach(file => {
+    debug(`loadControllersSync: load file ${file} ...`)
+    collectExports(localRequire(path.resolve(cwd, file)), controllerConstructors)
+  })
+  return controllerConstructors
+}
+
+/**
+ * Discovers controller modules with a glob, loads them with dynamic
+ * `import()`, and returns the classes and functions they export.
+ *
+ * Use it when the controller classes are needed for something other than a
+ * router, such as {@link generateOpenAPI}. Files are imported sequentially in
+ * ascending order of their paths.
+ *
+ * @param options Controller discovery options.
+ * @param options.cwd Base directory used to resolve `files`. Defaults to
+ * `process.cwd()`.
+ * @param options.files Glob pattern for controller modules. By default it
+ * recursively matches JavaScript and TypeScript files below `api`.
+ * @returns A promise resolving to the exported constructors, in load order.
+ */
+export async function loadControllersAsync({
+  cwd = process.cwd(),
+  files = 'api/**/*.[jt]s',
+}: {
+  cwd?: string
+  files?: string
+} = {}): Promise<ControllerConstructor[]> {
+  const controllerConstructors: ControllerConstructor[] = []
+  for (const file of findControllerFiles(files, cwd)) {
+    debug(`loadControllersAsync: load file ${file} ...`)
+    const fileUrl = pathToFileURL(path.resolve(cwd, file)).href
+    collectExports(await import(fileUrl), controllerConstructors)
+  }
+  return controllerConstructors
 }
 
 /**

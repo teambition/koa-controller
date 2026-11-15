@@ -1,5 +1,7 @@
 import type { SchemaObject } from 'ajv'
 import type { Context } from 'koa'
+import { ensureMethodMeta } from './metadata.js'
+import type { ControllerConstructor } from './metadata.js'
 import { before } from './router.js'
 
 /** Part of the request a top-level {@link stateInput} field is read from. */
@@ -279,6 +281,7 @@ export function stateInput<const F extends InputFields>(fields: F) {
     propertyName: string,
     descriptor: TypedPropertyDescriptor<M>
   ): void => {
+    ensureMethodMeta(target.constructor as ControllerConstructor, propertyName).input = fields
     decorator(target, propertyName, descriptor)
   }
 }

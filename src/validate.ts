@@ -2,6 +2,7 @@ import assert from 'assert'
 import { Ajv } from 'ajv'
 import type { SchemaObject } from 'ajv'
 import createHttpError from 'http-errors'
+import { ensureMethodMeta } from './metadata.js'
 import { before } from './router.js'
 
 /**
@@ -110,7 +111,7 @@ export function validateState(jsonSchema: SchemaObject, {
   ajv?: typeof globalAjvInstance
 } = {}) {
   const validate = ajv.compile(jsonSchema)
-  return before(async function validateStateMW (ctx) {
+  const decorator = before(async function validateStateMW (ctx) {
     if (!validate(ctx.state)) {
       const error = validate.errors?.[0]
       assert(error, 'internal validation failed')
@@ -118,4 +119,12 @@ export function validateState(jsonSchema: SchemaObject, {
       throw createHttpError(400, message, { ...error, message })
     }
   })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (target: any, propertyName?: string, descriptor?: PropertyDescriptor) => {
+    if (typeof propertyName === 'string') {
+      // Decorators run bottom-up; keep the schemas in execution order.
+      ensureMethodMeta(target.constructor, propertyName).stateSchemas.unshift(jsonSchema)
+    }
+    decorator(target, propertyName, descriptor)
+  }
 }
