@@ -1,3 +1,10 @@
+## [2.0.1](https://github.com/teambition/koa-controller/compare/v2.0.0...v2.0.1) (2026-11-15)
+
+### Bug Fixes
+
+* correct router, tracing, error handling and packaging issues ([#17](https://github.com/teambition/koa-controller/issues/17)) ([67f2968](https://github.com/teambition/koa-controller/commit/67f296852277ae340e9e125d99159c07d4909707))
+* correct span tags and clean up minor inconsistencies ([#16](https://github.com/teambition/koa-controller/issues/16)) ([44875d5](https://github.com/teambition/koa-controller/commit/44875d5626a82317772c45ff8339c762c051505c))
+
 # 2.0.0 (2026-07-18)
 
 ### Bug Fixes
