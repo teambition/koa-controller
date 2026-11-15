@@ -30,11 +30,14 @@ describe('openapi test suite', () => {
     @stateInput(CommentFields)
     @validateState({
       type: 'object',
-      required: ['page'],
+      required: ['id', 'content', 'page', 'sort'],
       properties: {
         id: { type: 'integer', minimum: 1 },
         page: { type: 'integer' },
         content: { type: 'string', minLength: 1 },
+        sort: { type: 'string' },
+        tags: { type: 'array' },
+        author: {},
       },
     })
     async createComment(state: InputType<typeof CommentFields>) { return state }

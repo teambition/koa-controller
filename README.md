@@ -293,7 +293,24 @@ The two decorators have separate jobs:
 | `@stateInput` | Picks each field from its source and puts it in `ctx.state`. Describes the state's TypeScript type. |
 | [`@validateState`](#validatestateschema-options) | Checks the state with AJV: types, required fields, any other JSON Schema rule. Converts values such as `"42"` to `42`. |
 
-`@stateInput` on its own does not validate or convert anything. Values are copied as they arrive, so without `@validateState` the `id` above is the string `"42"` and a missing `content` is simply absent. The types you declare with `Type` are a description of what the method expects; the `@validateState` schema is what enforces it. Keep the two in agreement: nothing checks that they match.
+`@stateInput` on its own does not validate or convert anything. Values are copied as they arrive, so without `@validateState` the `id` above is the string `"42"` and a missing `content` is simply absent. The types you declare with `Type` are a description of what the method expects; the `@validateState` schema is what enforces it.
+
+Because the two are written separately, they are compared when the router is built. A contradiction is a bug in the route, so it throws at startup:
+
+```text
+CommentController.create: @stateInput and @validateState do not match:
+  - "page" is a @stateInput field but is not in the @validateState schema, so it is never checked or converted
+  - "id" is declared as number in @stateInput, but the @validateState schema allows string
+```
+
+| Contradiction | Why it is a bug |
+| --- | --- |
+| A `@stateInput` field is missing from the schema's `properties` | The field is never checked or converted. |
+| A schema property or `required` name is not a `@stateInput` field | It can never have a value. |
+| The schema allows a type the field does not declare | The state type is wrong, for example `Type.Number` against `type: 'string'`. `integer` counts as `number`. |
+| A field is `required` in `@stateInput` but not in the schema | The state type says it is present, but it may be missing. |
+
+The comparison reads only the schema's top-level `properties` and `required`, and each property's `type`. A schema that uses `oneOf`, `anyOf`, `allOf`, `not`, `if`, `$ref` or `patternProperties` at its root cannot be compared reliably and is not checked; keeping it in line with the `Type` definition is then up to you. A route with `@stateInput` and no `@validateState` is not checked either.
 
 Field options:
 

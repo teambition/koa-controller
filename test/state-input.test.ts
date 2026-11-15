@@ -40,6 +40,8 @@ describe('stateInput test suite', () => {
         content: { type: 'string' },
         page: { type: 'integer', minimum: 1 },
         draft: { type: 'boolean' },
+        tags: { type: 'array', items: { type: 'string' } },
+        author: { type: 'object' },
       },
     })
     async createChecked(state: InputType<typeof CommentFields>) {
