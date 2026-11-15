@@ -16,8 +16,14 @@ execSync('tsc -p tsconfig.build.cjs.json', { stdio: 'inherit' })
 // Step 2: Post-process CJS output — fix .cjs extensions and strip import.meta
 if (existsSync(LIB_CJS)) {
   for (const f of readdirSync(LIB_CJS)) {
-    if (f.endsWith('.js')) {
-      const filePath = join(LIB_CJS, f)
+    const filePath = join(LIB_CJS, f)
+    if (f.endsWith('.d.ts')) {
+      // Type declarations for CJS consumers: ./foo.js → ./foo.cjs, .d.ts → .d.cts
+      const content = readFileSync(filePath, 'utf-8')
+        .replace(/(from\s+['"]\.[^'"]+)\.js(['"])/g, '$1.cjs$2')
+      writeFileSync(filePath, content)
+      renameSync(filePath, join(LIB, f.replace(/\.d\.ts$/, '.d.cts')))
+    } else if (f.endsWith('.js')) {
       let content = readFileSync(filePath, 'utf-8')
       // Replace require("./foo.js") → require("./foo.cjs")
       content = content.replace(/require\("(\.[^"]+)\.js"\)/g, 'require("$1.cjs")')
@@ -25,8 +31,7 @@ if (existsSync(LIB_CJS)) {
       content = content.replace(/const metaUrl = .*/, "const metaUrl = '' // stripped for CJS")
       writeFileSync(filePath, content)
       // Rename .js → .cjs and move to lib/
-      const newName = f.replace(/\.js$/, '.cjs')
-      renameSync(filePath, join(LIB, newName))
+      renameSync(filePath, join(LIB, f.replace(/\.js$/, '.cjs')))
     }
   }
   rmSync(LIB_CJS, { recursive: true })
@@ -35,4 +40,4 @@ if (existsSync(LIB_CJS)) {
 // Step 3: Build ESM
 execSync('tsc -p tsconfig.build.json', { stdio: 'inherit' })
 
-console.log('✅ Dual build complete: lib/*.js (ESM) + lib/*.cjs (CJS)')
+console.log('✅ Dual build complete: lib/*.js + *.d.ts (ESM), lib/*.cjs + *.d.cts (CJS)')

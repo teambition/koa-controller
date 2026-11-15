@@ -2,12 +2,13 @@ import type { AsyncLocalStorage } from 'async_hooks'
 import { randomUUID } from 'crypto'
 import type { Middleware as KoaMiddleware, Context as KoaContext, DefaultState } from 'koa'
 import { Tracer, FORMAT_HTTP_HEADERS, Tags, Span } from 'opentracing'
+import { redactUrl } from './redact.js'
 
 interface Context extends KoaContext {
   tracer: Tracer
   span?: Span
   traceId?: string
-  routePath?: string
+  routerPath?: string
 }
 
 type Middleware = KoaMiddleware<DefaultState, Context>
@@ -67,6 +68,9 @@ export function alsMW<T>(als: AsyncLocalStorage<T>): Middleware {
  * extraction if standard OpenTracing HTTP headers contain no trace ID.
  * @param options.als Optional AsyncLocalStorage instance that receives the
  * current span and trace ID.
+ * @param options.redactQuery Query parameter names whose values are replaced
+ * by `[REDACTED]` in the recorded URL, in addition to
+ * `defaultRedactedQueryKeys`.
  * @returns Koa request tracing middleware.
  *
  * @example
@@ -84,7 +88,7 @@ export function alsMW<T>(als: AsyncLocalStorage<T>): Middleware {
  * }))
  * ```
  */
-export function traceMW<T extends { span?: Span, traceId?: string }>(tracer: Tracer, { zipkinHeaderEnable, als }: { zipkinHeaderEnable?: boolean, als?: AsyncLocalStorage<T> } = {}): Middleware {
+export function traceMW<T extends { span?: Span, traceId?: string }>(tracer: Tracer, { zipkinHeaderEnable, als, redactQuery }: { zipkinHeaderEnable?: boolean, als?: AsyncLocalStorage<T>, redactQuery?: string[] } = {}): Middleware {
   return async function traceMW (ctx, next) {
     let parentSpanContext = tracer.extract(FORMAT_HTTP_HEADERS, ctx.headers)
     if (!parentSpanContext?.toTraceId() && zipkinHeaderEnable) {
@@ -103,10 +107,11 @@ export function traceMW<T extends { span?: Span, traceId?: string }>(tracer: Tra
     } 
 
     return next().finally(() => {
-      span.setOperationName(`http-request ${ctx.method} ${ctx.routePath || ctx.url || 'unknown'}`)
+      const url = redactUrl(ctx.url, redactQuery)
+      span.setOperationName(`http-request ${ctx.method} ${ctx.routerPath || url || 'unknown'}`)
       span.setTag(Tags.HTTP_STATUS_CODE, ctx.status)
       span.setTag(Tags.HTTP_METHOD, ctx.method)
-      span.setTag(Tags.HTTP_URL, ctx.url)
+      span.setTag(Tags.HTTP_URL, url)
       if (ctx.status >= 500) {
         span.setTag(Tags.ERROR, true)
       }

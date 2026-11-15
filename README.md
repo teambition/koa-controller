@@ -9,7 +9,7 @@ pnpm add @tng/koa-controller koa koa-bodyparser
 pnpm add -D typescript @types/koa @types/koa-bodyparser @types/koa-router
 ```
 
-The package targets Node.js 20 or later and uses legacy TypeScript decorators. Enable decorator support in your `tsconfig.json`:
+`koa` is a peer dependency (version 2 or later). The package targets Node.js 20 or later and uses legacy TypeScript decorators. Enable decorator support in your `tsconfig.json`:
 
 ```json
 {
@@ -108,6 +108,33 @@ export class HealthController {
 
 A controller class is instantiated once when the router is built. Do not keep request-specific mutable state on the instance because it is shared by concurrent requests.
 
+### Controller inheritance
+
+A controller can extend another controller. The subclass inherits the parent's routes and middlewares; decorating the subclass never changes the parent.
+
+```ts
+@controller('/v1/users')
+@before(authenticate)
+export class UserController {
+  @get('/:id')
+  async getUser(state, ctx) {
+    return this.find(ctx.params.id)
+  }
+}
+
+@controller('/v2/users')
+export class UserV2Controller extends UserController {
+  @get('/:id/profile')
+  async getProfile(state, ctx) {
+    return this.findProfile(ctx.params.id)
+  }
+}
+```
+
+- Prefixes are not inherited. A subclass is registered only under the prefixes it declares with its own `@controller`, and a subclass without `@controller` is not registered.
+- Parent middlewares wrap the subclass's own: parent `@before` callbacks run first and parent `@after` callbacks run last.
+- Each registered class gets its own instance, so an inherited route calls the subclass's overridden methods.
+
 ### `@request(verb?: string, pathname?: string)`
 
 Registers a controller method for an HTTP verb and path. The same method can have more than one route decorator.
@@ -123,6 +150,16 @@ export class SessionController {
 ```
 
 Controller methods must be asynchronous/thenable. Their resolved result is assigned to `ctx.body`.
+
+A method may also write the response itself, for example by assigning a stream to `ctx.body` or calling `ctx.redirect()`. When the method resolves to `undefined`, a body it set on the context is kept. When it neither returns a value nor sets a body, the response is `204 No Content`.
+
+```ts
+@get('/download')
+async download(state, ctx) {
+  ctx.type = 'text/csv'
+  ctx.body = createReadStream(reportPath)
+}
+```
 
 ### `@get(pathname?: string)` and `@post(pathname?: string)`
 
@@ -189,6 +226,15 @@ Options:
 | `files` | `api/**/*.[jt]s` | Glob pattern used to discover controller modules. |
 | `prefix` | `''` | Prefix passed to the underlying Koa router. |
 | `logger` | `undefined` | Accepted for API compatibility; controller discovery currently uses the `koa:controller` debug namespace. |
+
+Matched files are loaded in ascending order of their paths, on every platform. Routes are matched in the order they are registered, so when two routes overlap, the one in the file that sorts first wins. Name the files to control this:
+
+```text
+controllers/01-users-me.ts    →  GET /users/me     (registered first)
+controllers/02-users.ts       →  GET /users/:id
+```
+
+Paths are compared character by character, so digits sort before uppercase letters, which sort before lowercase letters, and `10-x.ts` sorts before `2-x.ts`. Pad numeric prefixes with zeros (`02-`, `10-`).
 
 For dependency injection or tests, use `loadRouter` to provide constructors directly:
 
@@ -338,6 +384,8 @@ app.use(loggerMW({
 }))
 ```
 
+Sensitive query parameters in `url` are redacted (see [Redaction](#redaction)); pass `redactQuery: ['name']` to add more.
+
 Set `ctx.skipLogger = true` to suppress the request log. If `inject` throws, the middleware ignores that error and logs the base request data.
 
 ## Error handling
@@ -352,13 +400,67 @@ Catches downstream errors and responds with:
 }
 ```
 
-The middleware uses `error.status` when present and defaults to HTTP 500. Errors with status 500 or greater are sent to the optional logger.
+The middleware uses `error.status` when present and defaults to HTTP 500.
 
 ```ts
 app.use(errorHandlerMW({ logger }))
 ```
 
 Register `loggerMW` before `errorHandlerMW` if the request logger should observe the final error status.
+
+**Response message.** The error's own message is sent to the client only when it is safe to expose:
+
+| Error | Message sent |
+| --- | --- |
+| Status below 500 (for example `ctx.throw(400, 'name is required')`) | The error message |
+| Status 500 or above, or no status | The status text, for example `Internal Server Error` |
+| `error.expose` set to `true` or `false` | Follows `expose`, whatever the status |
+
+This matches the `expose` convention of [`http-errors`](https://github.com/jshttp/http-errors) and keeps internal details such as database errors out of responses.
+
+**Logging.** Errors with status 500 or greater are sent to the optional logger as the error object with `method`, `url`, and `headers` attached. Sensitive values are replaced by `[REDACTED]` (see [Redaction](#redaction)), and the request body is not logged by default.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `logger` | `undefined` | Object with an `error` method. |
+| `redactHeaders` | `[]` | Header names to redact in addition to the defaults. |
+| `redactQuery` | `[]` | Query parameter names to redact in addition to the defaults. |
+| `logBody` | `false` | Adds the serialized request body as `reqBody`. The body is logged as is, without redaction. |
+| `serialize` | `undefined` | `(error, ctx) => unknown`. Builds the value passed to `logger.error`, replacing the default entry. |
+
+Use `serialize` for full control, for example to log a body with your own field-level redaction:
+
+```ts
+app.use(errorHandlerMW({
+  logger,
+  serialize: (error, ctx) => ({
+    err: error,
+    method: ctx.method,
+    url: redactUrl(ctx.url),
+    body: omit(ctx.request.body, ['password']),
+  }),
+}))
+```
+
+## Redaction
+
+Request logs, error logs, and trace spans replace sensitive values with `[REDACTED]`. Names are matched case-insensitively.
+
+| Where | Redacted by default |
+| --- | --- |
+| Headers (`errorHandlerMW`) | `authorization`, `proxy-authorization`, `cookie`, `set-cookie`, `x-api-key`, `x-auth-token`, `x-csrf-token`, `x-xsrf-token` |
+| URL query parameters (`loggerMW`, `errorHandlerMW`, `traceMW`) | `token`, `access_token`, `refresh_token`, `id_token`, `password`, `passwd`, `secret`, `client_secret`, `api_key`, `apikey`, `signature`, `sig` |
+
+Add your own names with the `redactHeaders` and `redactQuery` options. Redaction is by name only: a secret in the URL path, or in a header or parameter that is not listed, is not detected.
+
+The helpers are exported for use in `serialize` and `inject` callbacks:
+
+```ts
+import { redactHeaders, redactUrl } from '@tng/koa-controller'
+
+redactUrl('/callback?token=abc&page=2') // '/callback?token=[REDACTED]&page=2'
+redactHeaders(ctx.headers, ['x-internal-secret'])
+```
 
 ## Tracing and async context
 
@@ -371,6 +473,8 @@ app.use(traceMW(tracer))
 ```
 
 Pass `zipkinHeaderEnable: true` to fall back to Zipkin header extraction when the standard HTTP header format has no parent trace.
+
+The span is named after the matched route, for example `http-request GET /users/:id`. The recorded URL has sensitive query parameters redacted (see [Redaction](#redaction)); pass `redactQuery: ['name']` to add more.
 
 ### `alsMW(als)`
 
@@ -402,7 +506,7 @@ pnpm test:coverage
 pnpm build
 ```
 
-The build produces both ESM (`lib/*.js`) and CommonJS (`lib/*.cjs`) entry points, plus TypeScript declarations.
+The build produces both ESM (`lib/*.js`) and CommonJS (`lib/*.cjs`) entry points, each with its own TypeScript declarations (`lib/*.d.ts` and `lib/*.d.cts`).
 
 ## License
 

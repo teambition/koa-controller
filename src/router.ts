@@ -11,7 +11,6 @@ import { createRequire } from 'node:module'
 
 interface Context extends KoaContext {
   span?: Span
-  routePath?: string
 }
 type Middleware = KoaMiddleware<DefaultState, Context>
 
@@ -29,7 +28,9 @@ export interface MiddlewareFn {
 type MiddlewareMaker = (options: {controllerName: string, propertyName?: string}) => Middleware
 
 const debug = Debug('koa:controller')
-const controllerSymbol = Symbol('controller')
+// Registered globally so that every loaded copy of this package (ESM and CJS
+// builds, or duplicated installs) recognizes the same controller metadata.
+const controllerSymbol = Symbol.for('@tng/koa-controller:controller')
 
 type Controller = object
 
@@ -44,13 +45,56 @@ class ControllerMeta {
   methodMetaMap: Map<string, MethodMeta> = new Map()
 }
 
+function getOwnControllerMeta(constructor: ControllerConstructor): ControllerMeta | undefined {
+  // Static members are inherited through the prototype chain, so a plain
+  // property read on a subclass would return the parent's metadata.
+  return Object.prototype.hasOwnProperty.call(constructor, controllerSymbol)
+    ? constructor[controllerSymbol]
+    : undefined
+}
+
 function ensureControllerMeta(constructor: ControllerConstructor): ControllerMeta {
-  let meta = constructor[controllerSymbol]
+  let meta = getOwnControllerMeta(constructor)
   if (!meta) {
     meta = new ControllerMeta()
     constructor[controllerSymbol] = meta
   }
   return meta
+}
+
+/**
+ * Merges the metadata declared on a controller class with the metadata
+ * declared on its parent classes.
+ *
+ * Routes and middlewares are inherited, with parent middlewares placed before
+ * the subclass's own so that they wrap them. Prefixes are not inherited: a
+ * class is only registered under the prefixes it declares itself.
+ */
+function resolveControllerMeta(constructor: ControllerConstructor): ControllerMeta | undefined {
+  const ownMeta = getOwnControllerMeta(constructor)
+  if (!ownMeta) return undefined
+
+  const chain: ControllerMeta[] = []
+  for (let current = constructor; typeof current === 'function'; current = Object.getPrototypeOf(current)) {
+    const meta = getOwnControllerMeta(current)
+    if (meta) chain.unshift(meta)
+  }
+
+  const resolved = new ControllerMeta()
+  resolved.prefixs = [...ownMeta.prefixs]
+  for (const meta of chain) {
+    resolved.middlewares.push(...meta.middlewares)
+    meta.methodMetaMap.forEach((methodMeta, propertyName) => {
+      let resolvedMethodMeta = resolved.methodMetaMap.get(propertyName)
+      if (!resolvedMethodMeta) {
+        resolvedMethodMeta = new MethodMeta()
+        resolved.methodMetaMap.set(propertyName, resolvedMethodMeta)
+      }
+      resolvedMethodMeta.routes.push(...methodMeta.routes)
+      resolvedMethodMeta.middlewares.push(...methodMeta.middlewares)
+    })
+  }
+  return resolved
 }
 
 class Route {
@@ -387,7 +431,7 @@ export function loadRouter({
   const router = new KoaRouter({ prefix })
   controllerConstructors.forEach(controllerConstructor => {
     if (typeof controllerConstructor !== 'function') return
-    const controllerMeta = Reflect.get(controllerConstructor, controllerSymbol)
+    const controllerMeta = resolveControllerMeta(controllerConstructor)
     if (!controllerMeta) return
 
     const controller = new controllerConstructor()
@@ -407,14 +451,19 @@ export function loadRouter({
         const span = ctx.span?.tracer().startSpan(routerName, { childOf: ctx.span })
         span?.setTag('Controller', controllerName)
         span?.setTag('Method', propertyName)
-        ctx.body = await Promise.resolve(controllerMethod.call(controller, ctx.state, ctx)).finally(() => {
+        const result = await Promise.resolve(controllerMethod.call(controller, ctx.state, ctx)).finally(() => {
           span?.finish()
         })
+        // Keep a body the method set itself (a stream, `ctx.redirect()`, ...)
+        // when it returns nothing.
+        if (result !== undefined || ctx.body === undefined) {
+          ctx.body = result
+        }
       }
 
       for (const prefix of controllerMeta.prefixs) {
         for (const { verb, pathname } of methodMeta.routes) {
-          const route = (path.join(prefix, pathname)).replace(/\/+$/, '') || '/'
+          const route = (path.posix.join(prefix, pathname)).replace(/\/+$/, '') || '/'
           debug(`register ${verb} ${route} ${routerName} (${controllerMiddlewares.length + methodMiddlewares.length} mw)`)
           router.register(route, [verb], [...controllerMiddlewares, ...methodMiddlewares, mainMW], { name: routerName })
         }
@@ -430,7 +479,8 @@ export function loadRouter({
  *
  * Use this synchronous loader only when every matched controller module can be
  * loaded by CommonJS `require()`. Each controller class must be exported from
- * its module. Use {@link getRouterAsync} for ESM controller modules.
+ * its module. Use {@link getRouterAsync} for ESM controller modules. Files are
+ * loaded in ascending order of their paths.
  *
  * @param options Controller discovery and router options.
  * @param options.cwd Base directory used to resolve `files`. Defaults to
@@ -469,7 +519,7 @@ export function getRouterSync({
   // @ts-ignore TS1343 — import.meta only in ESM, stripped for CJS build
   const metaUrl: string = import.meta?.url ?? ''
   const localRequire: NodeRequire = metaUrl ? createRequire(metaUrl) as NodeRequire : require as NodeRequire
-  globSync(files, { cwd }).forEach(file => {
+  findControllerFiles(files, cwd).forEach(file => {
     debug(`getRouterSync: load file ${file} ...`)
     collectExports(localRequire(path.resolve(cwd, file)), controllerConstructors)
   })
@@ -481,8 +531,9 @@ export function getRouterSync({
  * and builds a Koa router.
  *
  * This is the recommended loader for ESM projects. Every controller class must
- * be exported from its module. Files are imported sequentially in glob result
- * order before their exported classes are passed to {@link loadRouter}.
+ * be exported from its module. Files are imported sequentially in ascending
+ * order of their paths before their exported classes are passed to
+ * {@link loadRouter}.
  *
  * @param options Controller discovery and router options.
  * @param options.cwd Base directory used to resolve `files`. Defaults to
@@ -517,7 +568,7 @@ export async function getRouterAsync({
   logger?: Logger
 } = {}): Promise<KoaRouter> {
   const controllerConstructors: ControllerConstructor[] = []
-  const matchedFiles = globSync(files, { cwd })
+  const matchedFiles = findControllerFiles(files, cwd)
   for (const file of matchedFiles) {
     debug(`loadControllers: load file ${file} ...`)
     const fileUrl = pathToFileURL(path.resolve(cwd, file)).href
@@ -525,6 +576,23 @@ export async function getRouterAsync({
     collectExports(exportObject, controllerConstructors)
   }
   return loadRouter({ prefix, controllerConstructors, logger })
+}
+
+/**
+ * Finds controller files and returns them in a stable order.
+ *
+ * `glob` returns matches in directory traversal order, which differs between
+ * file systems. Routes are matched in registration order, so the files are
+ * sorted by path to make that order the same on every machine. The comparison
+ * is by character code, with `/` as the separator on every platform.
+ */
+function findControllerFiles(files: string, cwd: string): string[] {
+  const sortKey = (file: string) => file.split(path.sep).join('/')
+  return globSync(files, { cwd }).sort((a, b) => {
+    const keyA = sortKey(a)
+    const keyB = sortKey(b)
+    return keyA < keyB ? -1 : keyA > keyB ? 1 : 0
+  })
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

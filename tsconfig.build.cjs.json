@@ -4,7 +4,9 @@
     "outDir": "lib-cjs",
     "module": "CommonJS",
     "moduleResolution": "Bundler",
-    "declaration": false,
+    "declaration": true,
+    "sourceMap": false,
+    "inlineSources": false,
     "esModuleInterop": true,
   },
 }

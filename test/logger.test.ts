@@ -146,4 +146,18 @@ describe('logger test suite', () => {
     await mw(ctx, next)
     // No assertion needed — just checking no crash
   })
+  it('should redact sensitive query parameters in the logged url', async () => {
+    const logs: any[] = []
+    const logger: any = { info: (data: any) => logs.push(data) }
+    const ctx: any = {
+      status: 200,
+      method: 'GET',
+      originalUrl: '/callback?access_token=abc&state=xyz&trace=1',
+      get: () => '',
+    }
+    await loggerMW({ logger })(ctx, async () => {})
+    await loggerMW({ logger, redactQuery: ['state'] })(ctx, async () => {})
+    assert.equal(logs[0].url, '/callback?access_token=[REDACTED]&state=xyz&trace=1')
+    assert.equal(logs[1].url, '/callback?access_token=[REDACTED]&state=[REDACTED]&trace=1')
+  })
 })

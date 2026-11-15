@@ -1,4 +1,5 @@
 import type { Middleware as KoaMiddleware, Context as KoaContext, DefaultState } from 'koa'
+import { redactUrl } from './redact.js'
 
 /**
  * Minimal structured logger interface accepted by the package middleware.
@@ -38,7 +39,8 @@ interface Data {
  * every request.
  *
  * The base record contains the response status, HTTP method, registered router
- * name, duration in milliseconds, original URL, and user agent. Set
+ * name, duration in milliseconds, original URL, and user agent. Values of
+ * sensitive query parameters in the URL are replaced by `[REDACTED]`. Set
  * `ctx.skipLogger = true` in downstream middleware to skip a request.
  *
  * The middleware logs from a `finally` block. Register it before the error
@@ -50,6 +52,9 @@ interface Data {
  * omitted, the middleware performs no output.
  * @param options.inject Optional sync or async function used to add or replace
  * fields in the log record.
+ * @param options.redactQuery Query parameter names whose values are replaced
+ * by `[REDACTED]` in the logged URL, in addition to
+ * `defaultRedactedQueryKeys`.
  * @returns Koa request logging middleware.
  *
  * @example
@@ -67,9 +72,11 @@ interface Data {
 export function loggerMW({
   logger,
   inject = (d) => d,
+  redactQuery,
 }: {
   logger?: Logger
   inject?: (data: Data, ctx: KoaContext) => Data | Promise<Data>
+  redactQuery?: string[]
 } = {}): Middleware {
   return async (ctx, next) => {
     const start = Date.now()
@@ -82,7 +89,7 @@ export function loggerMW({
           method: ctx.method,
           routerName: ctx.routerName || 'unknown',
           duration: Date.now() - start,
-          url: ctx.originalUrl,
+          url: redactUrl(ctx.originalUrl, redactQuery),
           userAgent: ctx.get('user-agent'),
         }
         try {

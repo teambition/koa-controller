@@ -122,23 +122,23 @@ describe('trace test suite', () => {
       assert.equal(ctx.traceId, 'trace-123')
     })
 
-    it('should set operation name with method and routePath', async () => {
+    it('should set operation name with method and routerPath', async () => {
       const mw = traceMW(mockTracer)
 
       const ctx: any = {
         method: 'POST',
-        url: '/api/data',
-        routePath: '/api/data',
+        url: '/api/data/42?verbose=1',
+        routerPath: '/api/data/:id',
         status: 201,
         headers: {},
       }
       const next = async () => {}
 
       await mw(ctx, next)
-      assert.equal(spans[0]._operationName, 'http-request POST /api/data')
+      assert.equal(spans[0]._operationName, 'http-request POST /api/data/:id')
     })
 
-    it('should fall back to url when routePath is missing', async () => {
+    it('should fall back to url when routerPath is missing', async () => {
       const mw = traceMW(mockTracer)
 
       const ctx: any = {
@@ -151,6 +151,22 @@ describe('trace test suite', () => {
 
       await mw(ctx, next)
       assert.equal(spans[0]._operationName, 'http-request GET /some/path')
+    })
+
+    it('should redact sensitive query parameters in the span', async () => {
+      const mw = traceMW(mockTracer, { redactQuery: ['session'] })
+
+      const ctx: any = {
+        method: 'GET',
+        url: '/cb?token=abc&session=def&page=2',
+        status: 200,
+        headers: {},
+      }
+      await mw(ctx, async () => {})
+      const redacted = '/cb?token=[REDACTED]&session=[REDACTED]&page=2'
+      assert.equal(spans[0]._operationName, `http-request GET ${redacted}`)
+      assert.ok(!JSON.stringify(spans[0]._tags).includes('abc'))
+      assert.ok(JSON.stringify(spans[0]._tags).includes(redacted))
     })
 
     it('should set HTTP tags on span', async () => {
