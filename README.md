@@ -449,7 +449,7 @@ In this pattern, `@state` builds the value, `@validateState` verifies it at runt
 
 ### `generateOpenAPI(options)`
 
-Generates an [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document from your controllers. Paths and methods come from the route decorators, and parameters and request bodies come from [`@stateInput`](#stateinputfields):
+Generates an [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document from a router built by `getRouterAsync`, `getRouterSync` or `loadRouter`. Paths and methods are the ones the router actually serves, prefix included, and parameters and request bodies come from [`@stateInput`](#stateinputfields):
 
 | `@stateInput` field | In the document |
 | --- | --- |
@@ -458,41 +458,39 @@ Generates an [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document from y
 | `from: 'body'` (the default) | Property of the JSON request body |
 
 ```ts
-import { generateOpenAPI, getRouterAsync, loadControllersAsync } from '@tng/koa-controller'
+import { generateOpenAPI, getRouterAsync } from '@tng/koa-controller'
 
-const controllerConstructors = await loadControllersAsync({ files: 'src/controllers/**/*.[jt]s' })
+const router = await getRouterAsync({
+  files: 'src/controllers/**/*.[jt]s',
+  prefix: '/v1',
+})
+app.use(router.routes())
 
 const document = generateOpenAPI({
-  controllerConstructors,
+  router,
   info: { title: 'Blog API', version: '1.0.0' },
-  prefix: '/v1',
 })
 ```
 
-The result is a plain object. Serve it from a route, or write it to a file:
-
-```ts
-@controller('/openapi.json')
-export class OpenAPIController {
-  @get('/')
-  async document() {
-    return document
-  }
-}
-```
-
-`loadControllersAsync` and `loadControllersSync` take the same `cwd` and `files` options as `getRouterAsync` and `getRouterSync`, and return the controller classes instead of a router. Pass the same classes to `loadRouter` to avoid loading the files twice.
+The result is a plain object. Serve it from a route, or write it to a file.
 
 Options:
 
 | Option | Description |
 | --- | --- |
-| `controllerConstructors` | Controller classes to document. |
-| `info` | `{ title, version }`, plus any other OpenAPI `info` fields. |
-| `prefix` | Prefix added to every path. Use the same value as the router's `prefix`. |
+| `router` | The router to document. Required. |
+| `info` | `{ title, version }`, plus any other OpenAPI `info` fields. Required. |
+| `prefix` | Prefix added to every path, for a router mounted under a path it does not know about, such as with `koa-mount`. |
 | `servers` | OpenAPI server objects. |
 | `components` | OpenAPI components, copied unchanged. Use it for security schemes. |
 | `security` | Security requirements applied to every operation. |
+
+Which routes are documented:
+
+- **Routes built from controllers.** Each route handler `loadRouter` registers carries its controller method's metadata, so the document follows the router: a prefix set later with `router.prefix()` is included, and so is the path of a parent router the routes are merged into with `parent.use('/api', router.routes())`. Such a parent router can be passed too.
+- **Not routes added by hand**, such as `router.get('/health', ...)`.
+- **Optional segments** such as `/list{/:page}` become one path per variant, since OpenAPI paths cannot have optional parts. Wildcards such as `/*rest` become a `{rest}` parameter.
+- A router that was not built by koa-controller and has none of its routes is rejected with a `TypeError`.
 
 What ends up in the document:
 

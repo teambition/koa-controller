@@ -40,7 +40,7 @@ describe('metadata written by an older copy of the package', () => {
     const router = loadRouter({ controllerConstructors: [LegacyController as any] })
     assert.equal((await call(router, 'GET', '/legacy/hello')).body, 'hello')
 
-    const { paths } = generateOpenAPI({ controllerConstructors: [LegacyController as any], info })
+    const { paths } = generateOpenAPI({ router, info })
     assert.deepEqual(paths['/legacy/hello'].get, {
       operationId: 'LegacyController_hello',
       tags: ['LegacyController'],
@@ -61,7 +61,7 @@ describe('metadata written by an older copy of the package', () => {
     const router = loadRouter({ controllerConstructors: [MixedController as any] })
     assert.deepEqual((await call(router, 'GET', '/mixed/7')).body, { id: 7 })
 
-    const { paths } = generateOpenAPI({ controllerConstructors: [MixedController as any], info })
+    const { paths } = generateOpenAPI({ router, info })
     assert.equal(paths['/mixed/{id}'].get.summary, 'Show one')
     assert.deepEqual(paths['/mixed/{id}'].get.parameters, [
       { name: 'id', in: 'path', required: true, schema: { type: 'integer' } },

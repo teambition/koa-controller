@@ -6,9 +6,8 @@ import KoaRouter from 'koa-router'
 import type { Logger } from './logger.js'
 import { strict as assert } from'assert'
 import { createRequire } from 'node:module'
-import { ensureControllerMeta, ensureMethodMeta, joinRoutePath, resolveControllerMeta, Route } from './metadata.js'
+import { attachRouteInfo, ensureControllerMeta, ensureMethodMeta, joinRoutePath, markRouter, resolveControllerMeta, Route } from './metadata.js'
 import type { Context, ControllerConstructor, Middleware } from './metadata.js'
-
 
 /**
  * A function used by {@link before} and {@link after}.
@@ -363,6 +362,7 @@ export function loadRouter({
           ctx.body = result
         }
       }
+      attachRouteInfo(mainMW, { controllerName, propertyName, controllerMeta, methodMeta })
 
       for (const prefix of controllerMeta.prefixs) {
         for (const { verb, pathname } of methodMeta.routes) {
@@ -373,6 +373,7 @@ export function loadRouter({
       }
     })
   })
+  markRouter(router)
   return router
 }
 
@@ -466,65 +467,25 @@ export async function getRouterAsync({
   return loadRouter({ prefix, controllerConstructors, logger })
 }
 
-/**
- * Discovers controller modules with a glob, loads them with `require()`, and
- * returns the classes and functions they export.
- *
- * Use it when the controller classes are needed for something other than a
- * router, such as {@link generateOpenAPI}. Files are loaded in ascending order
- * of their paths. Use {@link loadControllersAsync} for ESM controller modules.
- *
- * @param options Controller discovery options.
- * @param options.cwd Base directory used to resolve `files`. Defaults to
- * `process.cwd()`.
- * @param options.files Glob pattern for controller modules. By default it
- * recursively matches JavaScript and TypeScript files below `api`.
- * @returns The exported constructors, in load order.
- */
-export function loadControllersSync({
-  cwd = process.cwd(),
-  files = 'api/**/*.[jt]s',
-}: {
-  cwd?: string
-  files?: string
-} = {}): ControllerConstructor[] {
+/** Loads the controller modules matched by a glob with `require()`. */
+function loadControllersSync({ cwd, files }: { cwd: string, files: string }): ControllerConstructor[] {
   const controllerConstructors: ControllerConstructor[] = []
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore TS1343 — import.meta only in ESM, stripped for CJS build
   const metaUrl: string = import.meta?.url ?? ''
   const localRequire: NodeRequire = metaUrl ? createRequire(metaUrl) as NodeRequire : require as NodeRequire
   findControllerFiles(files, cwd).forEach(file => {
-    debug(`loadControllersSync: load file ${file} ...`)
+    debug(`getRouterSync: load file ${file} ...`)
     collectExports(localRequire(path.resolve(cwd, file)), controllerConstructors)
   })
   return controllerConstructors
 }
 
-/**
- * Discovers controller modules with a glob, loads them with dynamic
- * `import()`, and returns the classes and functions they export.
- *
- * Use it when the controller classes are needed for something other than a
- * router, such as {@link generateOpenAPI}. Files are imported sequentially in
- * ascending order of their paths.
- *
- * @param options Controller discovery options.
- * @param options.cwd Base directory used to resolve `files`. Defaults to
- * `process.cwd()`.
- * @param options.files Glob pattern for controller modules. By default it
- * recursively matches JavaScript and TypeScript files below `api`.
- * @returns A promise resolving to the exported constructors, in load order.
- */
-export async function loadControllersAsync({
-  cwd = process.cwd(),
-  files = 'api/**/*.[jt]s',
-}: {
-  cwd?: string
-  files?: string
-} = {}): Promise<ControllerConstructor[]> {
+/** Loads the controller modules matched by a glob with dynamic `import()`, one at a time. */
+async function loadControllersAsync({ cwd, files }: { cwd: string, files: string }): Promise<ControllerConstructor[]> {
   const controllerConstructors: ControllerConstructor[] = []
   for (const file of findControllerFiles(files, cwd)) {
-    debug(`loadControllersAsync: load file ${file} ...`)
+    debug(`getRouterAsync: load file ${file} ...`)
     const fileUrl = pathToFileURL(path.resolve(cwd, file)).href
     collectExports(await import(fileUrl), controllerConstructors)
   }

@@ -2,7 +2,8 @@ import 'mocha'
 import { strict as assert } from 'assert'
 import { mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
-import { controller, get, post, request, loadControllersAsync, loadControllersSync, loadRouter } from '../src/router.js'
+import KoaRouter from 'koa-router'
+import { controller, get, post, request, getRouterAsync, getRouterSync, loadRouter } from '../src/router.js'
 import { stateInput, Type } from '../src/state-input.js'
 import type { InputType } from '../src/state-input.js'
 import { validateState } from '../src/validate.js'
@@ -11,6 +12,7 @@ import { apiDoc, generateOpenAPI } from '../src/openapi.js'
 
 describe('openapi test suite', () => {
   const info = { title: 'Test API', version: '1.2.3' }
+  const routerOf = (...controllerConstructors: any[]) => loadRouter({ controllerConstructors })
 
   const CommentFields = {
     id: Type.Number({ from: 'params', required: true }),
@@ -45,7 +47,7 @@ describe('openapi test suite', () => {
   }
 
   it('should describe a route with path, query and body fields', () => {
-    const document = generateOpenAPI({ controllerConstructors: [PostController], info })
+    const document = generateOpenAPI({ router: routerOf(PostController), info })
     assert.equal(document.openapi, '3.1.0')
     assert.deepEqual(document.info, info)
     assert.deepEqual(Object.keys(document.paths), ['/posts/{id}/comments', '/posts', '/posts/{id}'])
@@ -85,7 +87,7 @@ describe('openapi test suite', () => {
   })
 
   it('should describe routes without stateInput from the path alone', () => {
-    const document = generateOpenAPI({ controllerConstructors: [PostController], info })
+    const document = generateOpenAPI({ router: routerOf(PostController), info })
     assert.deepEqual(document.paths['/posts'], {
       get: {
         operationId: 'PostController_list',
@@ -107,17 +109,85 @@ describe('openapi test suite', () => {
     assert.deepEqual(ctx.body, { id: 5, content: 'hi', page: 2, sort: 'asc' })
   })
 
-  it('should apply the prefix and servers options', () => {
-    const servers = [{ url: 'https://api.example.com' }]
-    const document = generateOpenAPI({ controllerConstructors: [PostController], info, prefix: '/v1', servers })
+  it('should document the paths the router registers, including its prefix', () => {
+    const router = loadRouter({ controllerConstructors: [PostController], prefix: '/v1' })
+    const document = generateOpenAPI({ router, info })
     assert.deepEqual(Object.keys(document.paths), ['/v1/posts/{id}/comments', '/v1/posts', '/v1/posts/{id}'])
+  })
+
+  it('should add the prefix option for a router mounted under an outer path', () => {
+    const router = loadRouter({ controllerConstructors: [PostController], prefix: '/v1' })
+    const servers = [{ url: 'https://api.example.com' }]
+    const document = generateOpenAPI({ router, info, prefix: '/api', servers })
+    assert.deepEqual(Object.keys(document.paths), ['/api/v1/posts/{id}/comments', '/api/v1/posts', '/api/v1/posts/{id}'])
     assert.deepEqual(document.servers, servers)
+  })
+
+  it('should document a router built by getRouterSync or getRouterAsync', async () => {
+    const tmpDir = mkdtempSync(join(process.cwd(), '.test-tmp-'))
+    try {
+      writeFileSync(join(tmpDir, 'file.ts'), `
+import { controller, get, stateInput, Type } from '../src/index.js'
+
+@controller('/files')
+export class FileController {
+  @get('/:name')
+  @stateInput({ name: Type.String({ from: 'params', required: true }) })
+  async show(state: { name: string }) { return state }
+}
+`)
+      writeFileSync(join(tmpDir, 'file.cjs'), `
+class CjsController { async list() { return [] } }
+exports.CjsController = CjsController
+`)
+      const asyncRouter = await getRouterAsync({ cwd: tmpDir, files: '**/*.ts', prefix: '/v1' })
+      assert.deepEqual(Object.keys(generateOpenAPI({ router: asyncRouter, info }).paths), ['/v1/files/{name}'])
+
+      // Undecorated classes register nothing, but the router is still recognized.
+      const syncRouter = getRouterSync({ cwd: tmpDir, files: '**/*.cjs' })
+      assert.deepEqual(generateOpenAPI({ router: syncRouter, info }).paths, {})
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  it('should document routes merged into another router', () => {
+    const router = loadRouter({ controllerConstructors: [PostController], prefix: '/v1' })
+    const parent = new KoaRouter()
+    parent.use('/api', router.routes())
+    const document = generateOpenAPI({ router: parent, info })
+    assert.deepEqual(Object.keys(document.paths), ['/api/v1/posts/{id}/comments', '/api/v1/posts', '/api/v1/posts/{id}'])
+    assert.equal(document.paths['/api/v1/posts'].get.operationId, 'PostController_list')
+  })
+
+  it('should leave out routes added to the router by hand', () => {
+    const router = routerOf(PostController)
+    router.get('/health', async ctx => { ctx.body = 'ok' })
+    assert.ok(!('/health' in generateOpenAPI({ router, info }).paths))
+  })
+
+  it('should reject a router that is not built by koa-controller', () => {
+    const router = new KoaRouter()
+    router.get('/health', async ctx => { ctx.body = 'ok' })
+    assert.throws(() => generateOpenAPI({ router, info }), {
+      name: 'TypeError',
+      message: 'generateOpenAPI expects a router built by loadRouter, getRouterSync or getRouterAsync',
+    })
+    assert.throws(() => generateOpenAPI({ router: {} as any, info }), TypeError)
+  })
+
+  it('should not add enumerable properties to the router or its routes', () => {
+    const router = routerOf(PostController)
+    assert.deepEqual(Object.keys(router).sort(), Object.keys(new KoaRouter()).sort())
+    for (const layer of (router as any).stack) {
+      for (const handler of layer.stack) assert.deepEqual(Object.keys(handler), [])
+    }
   })
 
   it('should copy components and security to the document', () => {
     const components = { securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } }
     const security = [{ bearer: [] }]
-    const document = generateOpenAPI({ controllerConstructors: [PostController], info, components, security })
+    const document = generateOpenAPI({ router: routerOf(PostController), info, components, security })
     assert.deepEqual(document.components, components)
     assert.deepEqual(document.security, security)
     assert.deepEqual(Object.keys(document), ['openapi', 'info', 'paths', 'components', 'security'])
@@ -129,16 +199,33 @@ describe('openapi test suite', () => {
     class MultiController {
       @get('/x')
       @post('/x')
-      @request('put', '/y/:key(\\d+)')
-      @request('link', '/z')
+      @request('put', '/y/:key')
+      @request('all', '/z')
       async handle() {}
     }
-    const document = generateOpenAPI({ controllerConstructors: [MultiController], info })
+    const document = generateOpenAPI({ router: routerOf(MultiController), info })
     assert.deepEqual(Object.keys(document.paths).sort(), ['/a/x', '/a/y/{key}', '/b/x', '/b/y/{key}'])
+    // koa-router adds HEAD to GET routes; it is not documented separately.
     assert.deepEqual(Object.keys(document.paths['/a/x']).sort(), ['get', 'post'])
     const ids = Object.values(document.paths).flatMap(item => Object.values(item).map(operation => operation.operationId))
     assert.equal(new Set(ids).size, 6)
     assert.ok(ids.includes('MultiController_handle') && ids.includes('MultiController_handle_6'))
+  })
+
+  it('should convert wildcards and expand optional path segments', () => {
+    @controller('/files')
+    class FileController {
+      @get('/:dir/*rest')
+      async read() {}
+
+      @get('/list{/:page}')
+      async list() {}
+    }
+    const { paths } = generateOpenAPI({ router: routerOf(FileController), info })
+    assert.deepEqual(Object.keys(paths), ['/files/{dir}/{rest}', '/files/list', '/files/list/{page}'])
+    assert.deepEqual(paths['/files/{dir}/{rest}'].get.parameters!.map(p => p.name), ['dir', 'rest'])
+    assert.equal(paths['/files/list'].get.parameters, undefined)
+    assert.equal(paths['/files/list/{page}'].get.operationId, 'FileController_list_2')
   })
 
   it('should use apiDoc from the class as defaults and from the method as overrides', () => {
@@ -157,7 +244,7 @@ describe('openapi test suite', () => {
       })
       async b() {}
     }
-    const { paths } = generateOpenAPI({ controllerConstructors: [DocController], info })
+    const { paths } = generateOpenAPI({ router: routerOf(DocController), info })
     assert.deepEqual(paths['/docs/a'].get, {
       operationId: 'DocController_a',
       tags: ['docs'],
@@ -183,7 +270,7 @@ describe('openapi test suite', () => {
       @validateState({ type: 'object', required: ['name'], properties: { name: { type: 'string' } } })
       async update() {}
     }
-    const { paths } = generateOpenAPI({ controllerConstructors: [LegacyController], info })
+    const { paths } = generateOpenAPI({ router: routerOf(LegacyController), info })
     assert.deepEqual(paths['/legacy/{id}'].post, {
       operationId: 'LegacyController_update',
       tags: ['LegacyController'],
@@ -206,7 +293,7 @@ describe('openapi test suite', () => {
     class Plain {}
 
     const { paths } = generateOpenAPI({
-      controllerConstructors: [ParentController, ChildController, Plain as any, null as any],
+      router: routerOf(ParentController, ChildController, Plain, null),
       info,
     })
     assert.deepEqual(Object.keys(paths), ['/parent/{id}', '/child/{id}'])
@@ -220,39 +307,7 @@ describe('openapi test suite', () => {
   })
 
   it('should produce a JSON-serializable document', () => {
-    const document = generateOpenAPI({ controllerConstructors: [PostController], info })
+    const document = generateOpenAPI({ router: routerOf(PostController), info })
     assert.deepEqual(JSON.parse(JSON.stringify(document)), document)
-  })
-
-  describe('loadControllers', () => {
-    let tmpDir: string
-    beforeEach(() => { tmpDir = mkdtempSync(join(process.cwd(), '.test-tmp-')) })
-    afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }) })
-
-    const source = `
-import { controller, get, stateInput, Type } from '../src/index.js'
-
-@controller('/files')
-export class FileController {
-  @get('/:name')
-  @stateInput({ name: Type.String({ from: 'params', required: true }) })
-  async show(state: { name: string }) { return state }
-}
-`
-
-    it('should load controllers for generateOpenAPI with loadControllersAsync', async () => {
-      writeFileSync(join(tmpDir, 'file.ts'), source)
-      const controllerConstructors = await loadControllersAsync({ cwd: tmpDir, files: '**/*.ts' })
-      assert.deepEqual(controllerConstructors.map(c => c.name), ['FileController'])
-      const { paths } = generateOpenAPI({ controllerConstructors, info })
-      assert.deepEqual(Object.keys(paths), ['/files/{name}'])
-    })
-
-    it('should load controllers with loadControllersSync', () => {
-      writeFileSync(join(tmpDir, 'b.cjs'), 'exports.B = class B {}; exports.other = 1')
-      writeFileSync(join(tmpDir, 'a.cjs'), 'module.exports = class A {}')
-      const controllerConstructors = loadControllersSync({ cwd: tmpDir, files: '**/*.cjs' })
-      assert.deepEqual(controllerConstructors.map(c => c.name), ['A', 'B'])
-    })
   })
 })
