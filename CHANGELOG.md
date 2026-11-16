@@ -1,3 +1,11 @@
+# [2.1.0](https://github.com/teambition/koa-controller/compare/v2.0.1...v2.1.0) (2026-11-16)
+
+### Features
+
+* add [@state](https://github.com/state)Input and Type builders for typed request state ([6dfce10](https://github.com/teambition/koa-controller/commit/6dfce102a5dfd926d75cbd853d6c3f5e38d7919b))
+* fail at startup when [@state](https://github.com/state)Input and [@validate](https://github.com/validate)State disagree ([40c975d](https://github.com/teambition/koa-controller/commit/40c975d56c8eda73fdac40be42a804363436e73b))
+* generate OpenAPI 3.1 documents from controllers ([#16](https://github.com/teambition/koa-controller/issues/16)) ([513fc5b](https://github.com/teambition/koa-controller/commit/513fc5b73195d275c66c1820f1fe3c361b9c4fe1))
+
 ## [2.0.1](https://github.com/teambition/koa-controller/compare/v2.0.0...v2.0.1) (2026-11-15)
 
 ### Bug Fixes
