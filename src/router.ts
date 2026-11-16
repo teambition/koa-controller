@@ -6,7 +6,7 @@ import KoaRouter from 'koa-router'
 import type { Logger } from './logger.js'
 import { strict as assert } from'assert'
 import { createRequire } from 'node:module'
-import { attachRouteInfo, ensureControllerMeta, ensureMethodMeta, joinRoutePath, markRouter, resolveControllerMeta, Route } from './metadata.js'
+import { defineHidden, ensureControllerMeta, ensureMethodMeta, joinRoutePath, resolveControllerMeta, Route, routeSymbol, routerSymbol } from './metadata.js'
 import type { Context, ControllerConstructor, Middleware } from './metadata.js'
 
 /**
@@ -362,7 +362,7 @@ export function loadRouter({
           ctx.body = result
         }
       }
-      attachRouteInfo(mainMW, { controllerName, propertyName, controllerMeta, methodMeta })
+      defineHidden(mainMW, routeSymbol, { controllerName, propertyName, controllerMeta, methodMeta })
 
       for (const prefix of controllerMeta.prefixs) {
         for (const { verb, pathname } of methodMeta.routes) {
@@ -373,7 +373,7 @@ export function loadRouter({
       }
     })
   })
-  markRouter(router)
+  defineHidden(router, routerSymbol, true)
   return router
 }
 

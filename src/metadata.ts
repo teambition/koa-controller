@@ -139,8 +139,10 @@ export function joinRoutePath(prefix: string, pathname: string): string {
 
 // Registered globally, like the controller metadata, so that routers and
 // routes built by one copy of this package are recognized by another.
-const routerSymbol = Symbol.for('@tng/koa-controller:router')
-const routeSymbol = Symbol.for('@tng/koa-controller:route')
+/** Marks a router built by `loadRouter`. */
+export const routerSymbol = Symbol.for('@tng/koa-controller:router')
+/** Holds the {@link RouteInfo} of a route handler registered by `loadRouter`. */
+export const routeSymbol = Symbol.for('@tng/koa-controller:route')
 
 /** What a route handler built by `loadRouter` knows about its controller method. */
 export interface RouteInfo {
@@ -152,28 +154,7 @@ export interface RouteInfo {
   methodMeta: MethodMeta
 }
 
-function defineHidden(target: object, key: symbol, value: unknown) {
-  // Not enumerable, so it does not show up when the object is logged or copied.
+/** Defines a property that does not show up when the object is logged or copied. */
+export function defineHidden(target: object, key: symbol, value: unknown): void {
   Object.defineProperty(target, key, { value, configurable: true, enumerable: false, writable: true })
-}
-
-/** Marks a router as built by this package. */
-export function markRouter(router: object): void {
-  defineHidden(router, routerSymbol, true)
-}
-
-/** Whether a router was built by this package. */
-export function isMarkedRouter(router: unknown): boolean {
-  return typeof router === 'object' && router !== null && routerSymbol in router
-}
-
-/** Attaches controller method information to the route handler `loadRouter` registers. */
-export function attachRouteInfo(handler: object, info: RouteInfo): void {
-  defineHidden(handler, routeSymbol, info)
-}
-
-/** Reads the information attached by {@link attachRouteInfo}, if any. */
-export function getRouteInfo(handler: unknown): RouteInfo | undefined {
-  if (typeof handler !== 'function') return undefined
-  return (handler as unknown as Record<symbol, RouteInfo | undefined>)[routeSymbol]
 }

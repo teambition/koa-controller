@@ -1,6 +1,6 @@
 import type { SchemaObject } from 'ajv'
 import type KoaRouter from 'koa-router'
-import { ensureControllerMeta, ensureMethodMeta, getRouteInfo, isMarkedRouter, joinRoutePath } from './metadata.js'
+import { ensureControllerMeta, ensureMethodMeta, joinRoutePath, routeSymbol, routerSymbol } from './metadata.js'
 import type { MethodMeta, RouteInfo } from './metadata.js'
 
 /** An OpenAPI response object, passed through to the document unchanged. */
@@ -201,21 +201,6 @@ function buildOperation(methodMeta: MethodMeta, pathParams: string[]) {
   return operation
 }
 
-/** A router layer as koa-router stores it. */
-interface RouterLayer {
-  path: string
-  methods: string[]
-  stack: unknown[]
-}
-
-function findRouteInfo(layer: RouterLayer): RouteInfo | undefined {
-  for (let i = layer.stack.length - 1; i >= 0; i--) {
-    const info = getRouteInfo(layer.stack[i])
-    if (info) return info
-  }
-  return undefined
-}
-
 /**
  * Lists the OpenAPI methods of a layer. koa-router adds `HEAD` to every `GET`
  * route, which is left out, as are verbs OpenAPI has no method for.
@@ -281,11 +266,13 @@ export function generateOpenAPI({
   components?: OpenAPIDocument['components']
   security?: OpenAPIDocument['security']
 }): OpenAPIDocument {
-  const layers = ((router as unknown as { stack?: RouterLayer[] })?.stack ?? [])
-  const routes = layers
-    .map(layer => ({ layer, info: findRouteInfo(layer) }))
-    .filter((route): route is { layer: RouterLayer, info: RouteInfo } => route.info !== undefined)
-  if (!isMarkedRouter(router) && routes.length === 0) {
+  // The handler `loadRouter` registers is the last middleware of each route.
+  const routes = (router.stack ?? []).flatMap(layer => {
+    const handler = layer.stack[layer.stack.length - 1] as { [routeSymbol]?: RouteInfo } | undefined
+    const info = handler?.[routeSymbol]
+    return info ? [{ layer, info }] : []
+  })
+  if (!(routerSymbol in router) && routes.length === 0) {
     throw new TypeError('generateOpenAPI expects a router built by loadRouter, getRouterSync or getRouterAsync')
   }
 
