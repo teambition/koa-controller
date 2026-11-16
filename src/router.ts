@@ -418,7 +418,15 @@ export function getRouterSync({
   prefix?: string
   logger?: Logger
 } = {}) {
-  const controllerConstructors = loadControllersSync({ cwd, files })
+  const controllerConstructors: ControllerConstructor[] = []
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore TS1343 — import.meta only in ESM, stripped for CJS build
+  const metaUrl: string = import.meta?.url ?? ''
+  const localRequire: NodeRequire = metaUrl ? createRequire(metaUrl) as NodeRequire : require as NodeRequire
+  findControllerFiles(files, cwd).forEach(file => {
+    debug(`getRouterSync: load file ${file} ...`)
+    collectExports(localRequire(path.resolve(cwd, file)), controllerConstructors)
+  })
   return loadRouter({ prefix, controllerConstructors, logger })
 }
 
@@ -463,33 +471,15 @@ export async function getRouterAsync({
   prefix?: string
   logger?: Logger
 } = {}): Promise<KoaRouter> {
-  const controllerConstructors = await loadControllersAsync({ cwd, files })
-  return loadRouter({ prefix, controllerConstructors, logger })
-}
-
-/** Loads the controller modules matched by a glob with `require()`. */
-function loadControllersSync({ cwd, files }: { cwd: string, files: string }): ControllerConstructor[] {
   const controllerConstructors: ControllerConstructor[] = []
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore TS1343 — import.meta only in ESM, stripped for CJS build
-  const metaUrl: string = import.meta?.url ?? ''
-  const localRequire: NodeRequire = metaUrl ? createRequire(metaUrl) as NodeRequire : require as NodeRequire
-  findControllerFiles(files, cwd).forEach(file => {
-    debug(`getRouterSync: load file ${file} ...`)
-    collectExports(localRequire(path.resolve(cwd, file)), controllerConstructors)
-  })
-  return controllerConstructors
-}
-
-/** Loads the controller modules matched by a glob with dynamic `import()`, one at a time. */
-async function loadControllersAsync({ cwd, files }: { cwd: string, files: string }): Promise<ControllerConstructor[]> {
-  const controllerConstructors: ControllerConstructor[] = []
-  for (const file of findControllerFiles(files, cwd)) {
-    debug(`getRouterAsync: load file ${file} ...`)
+  const matchedFiles = findControllerFiles(files, cwd)
+  for (const file of matchedFiles) {
+    debug(`loadControllers: load file ${file} ...`)
     const fileUrl = pathToFileURL(path.resolve(cwd, file)).href
-    collectExports(await import(fileUrl), controllerConstructors)
+    const exportObject = await import(fileUrl)
+    collectExports(exportObject, controllerConstructors)
   }
-  return controllerConstructors
+  return loadRouter({ prefix, controllerConstructors, logger })
 }
 
 /**
